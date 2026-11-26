@@ -91,7 +91,7 @@ def _thu_thap_vbpl(conn, a) -> int:
                     raise LoiThuThap(
                         f"có {len(urls)} trang cùng số ký hiệu {n}, hãy chọn một url:\n    " + "\n    ".join(urls)
                     )
-            _, kq = thu_thap_url(conn, urls[0], bo_tai, luu)
+            _, kq = thu_thap_url(conn, urls[0], bo_tai, luu, so_mong_doi=None if n.startswith("http") else n)
             print(
                 f"OK   {kq.meta['so_ky_hieu']} ({kq.meta.get('co_quan_ban_hanh', '')}): {kq.so_dieu} điều, "
                 f"{kq.meta.get('tinh_trang_nguon', 'chưa rõ tình trạng')}. {kq.meta['url_goc']}"

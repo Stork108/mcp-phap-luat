@@ -406,21 +406,36 @@ def manh_so_ky_hieu(so: str) -> str:
     return "so-" + s
 
 
-_RE_SO_DAU_TIEN = re.compile(r"(?:^|-)(so-\d)")
+_RE_CUM_SO = re.compile(r"(?:^|-)so-(?=\d)")
+# Loại văn bản ghi số ngay sau tên loại ('nghi-dinh-so-181-...', đôi khi thiếu chữ 'so':
+# 'thong-tu-20-2026-tt-btc-...'); các loại còn lại (luật, bộ luật, pháp lệnh, văn bản hợp nhất
+# có tên trước số...) ghi số ở cuối tên ('luat-dat-dai-so-31-2024-qh15').
+_RE_SO_NGAY_SAU_LOAI = re.compile(
+    r"^(?:nghi-dinh|thong-tu|quyet-dinh|nghi-quyet|van-ban-hop-nhat|chi-thi|lenh|cong-van|thong-bao|ke-hoach)"
+    r"(?:-lien-tich)?-(?:so-)*(?=\d)"
+)
+
+
+def so_cua_van_ban_trong_ten(slug: str) -> str | None:
+    """Phần tên trang bắt đầu bằng số của chính văn bản, ví dụ '31-2024-qh15...'."""
+    m = _RE_SO_NGAY_SAU_LOAI.match(slug)
+    if m:
+        return slug[m.end() :]
+    cum = list(_RE_CUM_SO.finditer(slug))
+    return slug[cum[-1].end() :] if cum else None
 
 
 def tim_trong_ds_url(urls, so: str) -> list[str]:
-    """Trang có số ký hiệu đúng bằng `so`: chỉ xét cụm 'so-<số>' ĐẦU TIÊN trong tên trang
-    (là số của chính văn bản), để không lấy nhầm văn bản sửa đổi hay hợp nhất có nhắc tới số đó."""
-    manh = manh_so_ky_hieu(so)
-    out = []
+    """Trang có số ký hiệu đúng bằng `so`. Chỉ xét số của chính văn bản (đầu tên với nghị định,
+    thông tư...; cuối tên với luật), để không lấy nhầm văn bản sửa đổi hay hợp nhất có nhắc tới số đó."""
+    manh = manh_so_ky_hieu(so)[len("so-") :]
+    out: list[str] = []
     for u in urls:
         m = RE_CHI_TIET.match(urllib.parse.urlsplit(u).path)
-        if not m:
+        if not m or u in out:
             continue
-        slug = m.group(1).split("--")[0]
-        first = _RE_SO_DAU_TIEN.search(slug)
-        if first and slug.startswith(manh, first.start(1)) and slug[first.start(1) + len(manh) :][:1] in ("", "-"):
+        rest = so_cua_van_ban_trong_ten(m.group(1).split("--")[0])
+        if rest is not None and rest.startswith(manh) and rest[len(manh) :][:1] in ("", "-"):
             out.append(u)
     return out
 
@@ -482,8 +497,12 @@ def doc_trang(html: str, url: str, hom_nay: date | None = None) -> KetQua:
     return chuyen_doi(doc, content, url, hom_nay)
 
 
-def thu_thap_url(conn, url: str, bo_tai: BoTai, luu_html: Path | None = None) -> tuple[int, KetQua]:
+def thu_thap_url(
+    conn, url: str, bo_tai: BoTai, luu_html: Path | None = None, so_mong_doi: str | None = None
+) -> tuple[int, KetQua]:
+    """Tải, đọc và ghi một trang. Nếu có `so_mong_doi` mà số ký hiệu trên trang khác thì không ghi."""
     from .store import upsert_document
+    from .textnorm import chuan_hoa_so_ky_hieu
 
     url = chuan_hoa_url(url)
     body = bo_tai.tai(url)
@@ -491,6 +510,10 @@ def thu_thap_url(conn, url: str, bo_tai: BoTai, luu_html: Path | None = None) ->
         luu_html.mkdir(parents=True, exist_ok=True)
         (luu_html / (url.rsplit("--", 1)[-1] + ".html")).write_bytes(body)
     kq = doc_trang(body.decode("utf-8", "replace"), url)
+    if so_mong_doi and chuan_hoa_so_ky_hieu(kq.meta.get("so_ky_hieu", "")) != chuan_hoa_so_ky_hieu(so_mong_doi):
+        raise LoiThuThap(
+            f"trang {url} là văn bản số {kq.meta.get('so_ky_hieu')}, không phải {so_mong_doi}: không nhập."
+        )
     parsed = parse_text(kq.chu)
     kq.so_dieu = sum(1 for u in parsed.walk() if u.loai == "dieu")
     if kq.so_dieu == 0:

@@ -210,6 +210,17 @@ def test_tim_theo_so_ky_hieu_trong_sitemap(tmp_path):
         "https://vbpl.vn/van-ban/chi-tiet/luat-so-huu-tri-tue-so-50-2005-qh11--16748",
     ]
     assert tt.tim_trong_ds_url(urls, "50/2005/QH11") == urls[-1:]
+    sua = "https://vbpl.vn/van-ban/chi-tiet/luat-sua-doi-luat-dat-dai-so-31-2024-qh15-luat-nha-o-so-27-2023-qh15-so-43-2024-qh15--170509"
+    vbhn = "https://vbpl.vn/van-ban/chi-tiet/van-ban-hop-nhat-so-67-vbhn-vpqh-luat-doanh-nghiep--9"
+    assert tt.tim_trong_ds_url(urls + [sua], "31/2024/QH15") == urls[:1]
+    assert tt.tim_trong_ds_url([sua], "43/2024/QH15") == [sua]
+    assert tt.tim_trong_ds_url([sua], "27/2023/QH15") == []
+    assert tt.tim_trong_ds_url([vbhn], "67/VBHN-VPQH") == [vbhn]
+    tt20 = "https://vbpl.vn/van-ban/chi-tiet/thong-tu-20-2026-tt-btc-huong-dan-nghi-dinh-so-320-2025-nd-cp--7"
+    assert tt.tim_trong_ds_url([tt20], "20/2026/TT-BTC") == [tt20]
+    assert tt.tim_trong_ds_url([tt20], "320/2025/NĐ-CP") == []
+    hn = "https://vbpl.vn/van-ban/chi-tiet/van-ban-hop-nhat-ve-hoat-dong-dau-tu-so-142-2026-vbhn-lq-vpqh--8"
+    assert tt.tim_trong_ds_url([hn, hn], "142/2026/VBHN-LQ-VPQH") == [hn]
     assert tt.manh_so_ky_hieu("131/2024/NĐ-CP") == "so-131-2024-nd-cp"
     assert tt.tim_trong_ds_url(urls, "31/2024/QH15") == urls[:1]
     assert tt.tim_trong_ds_url(urls, "1/2024/NĐ-CP") == []  # không khớp nhầm 131/2024
@@ -241,6 +252,8 @@ def test_thu_thap_url_ghi_vao_kho(tmp_path):
     out = tools.trich_dieu_khoan(conn, "45/2019/QH14", "1")
     assert "Bộ luật Lao động quy định tiêu chuẩn lao động" in out
     assert "vbpl.vn" in out and URL_BLLD in out
+    with pytest.raises(tt.LoiThuThap, match="không nhập"):
+        tt.thu_thap_url(conn, URL_BLLD, tt.BoTai(mo_url=web), so_mong_doi="10/2012/QH13")
     # Thu thập lại cùng văn bản thì cập nhật, không tạo bản trùng.
     tt.thu_thap_url(conn, URL_BLLD, tt.BoTai(mo_url=web))
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 1
