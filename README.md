@@ -51,6 +51,18 @@ Lệnh cuối hiện danh sách lệnh là cài thành công.
 
 Lệnh tải khoảng 15 trang, mỗi trang cách nhau 4 giây, tôn trọng robots.txt, rồi lưu vào thư mục `C:\mcp-phap-luat\khao-sat-vbpl`. Chị nén thư mục đó (chuột phải > Send to > Compressed (zipped) folder) và gửi lại trong thread.
 
+Bước 2 của khảo sát (đọc sơ đồ trang `sitemap.xml` và 4 trang chi tiết văn bản; không gọi `/api/` và `/Pages/` vì robots.txt của vbpl.vn không cho phép):
+
+```powershell
+.venv\Scripts\phapluat khao-sat-vbpl --buoc 2
+```
+
+Kết quả nằm trong thư mục `khao-sat-vbpl-2`.
+
+### Cập nhật mã nguồn khi có bản mới
+
+Tải lại ZIP và giải nén **đè lên** thư mục cũ (`C:\mcp-phap-luat`), chọn "Replace" khi Windows hỏi. Không cần cài lại.
+
 ### 5. Nhập thử một văn bản
 
 Tải bản Word (.docx) của một văn bản từ vbpl.vn, rồi:

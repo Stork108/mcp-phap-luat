@@ -94,3 +94,85 @@ def chay(out_dir: str | Path = "khao-sat-vbpl", max_pages: int = 15, delay: floa
 
     (out / "bao-cao.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Bước 2: sơ đồ trang (sitemap) và vài trang chi tiết văn bản.
+# robots.txt của vbpl.vn chặn /api/ và /Pages/, nên công cụ không bao giờ gọi các đường dẫn đó.
+
+_CAM = ("/api/", "/Pages/")
+
+
+def _locs(xml: str) -> list[str]:
+    return [l.strip() for l in re.findall(r"<loc>\s*([^<]+?)\s*</loc>", xml)]
+
+
+def chay_buoc_2(out_dir: str | Path = "khao-sat-vbpl-2", so_trang_chi_tiet: int = 4, delay: float = 4.0) -> Path:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    report: dict = {"user_agent": USER_AGENT, "sitemaps": [], "pages": []}
+
+    status, final, body, _ = _fetch(BASE + "/robots.txt")
+    rp = urllib.robotparser.RobotFileParser()
+    rp.parse(body.decode("utf-8", "replace").splitlines() if status == 200 else [])
+
+    def allowed(url: str) -> bool:
+        path = urllib.parse.urlsplit(url).path
+        return url.startswith(BASE) and not any(path.startswith(c) for c in _CAM) and rp.can_fetch(USER_AGENT, url)
+
+    # Sơ đồ trang gốc, rồi tối đa 3 sơ đồ con.
+    queue = [BASE + "/sitemap.xml"]
+    page_urls: list[str] = []
+    n = 0
+    while queue and n < 4:
+        sm = queue.pop(0)
+        time.sleep(delay)
+        status, final, body, headers = _fetch(sm, timeout=60)
+        n += 1
+        name = f"sitemap_{n:02d}.xml"
+        (out / name).write_bytes(body[:5_000_000])
+        xml = body.decode("utf-8", "replace")
+        locs = _locs(xml)
+        is_index = "<sitemapindex" in xml
+        report["sitemaps"].append(
+            {"url": sm, "status": status, "file": name, "la_chi_muc": is_index, "so_loc": len(locs), "mau": locs[:30]}
+        )
+        if is_index:
+            queue.extend(locs[:3])
+        else:
+            page_urls.extend(locs)
+
+    # Chọn vài trang có vẻ là trang chi tiết văn bản (đường dẫn dài nhất, có chữ số).
+    cands = [u for u in page_urls if allowed(u) and re.search(r"\d", urllib.parse.urlsplit(u).path)]
+    cands.sort(key=lambda u: -len(urllib.parse.urlsplit(u).path))
+    seen_shapes: set[str] = set()
+    picked: list[str] = []
+    for u in cands:
+        shape = re.sub(r"\d+", "N", urllib.parse.urlsplit(u).path.rsplit("/", 1)[0])
+        if shape in seen_shapes and len(picked) < 2:
+            continue
+        seen_shapes.add(shape)
+        picked.append(u)
+        if len(picked) >= so_trang_chi_tiet:
+            break
+
+    for i, u in enumerate(picked):
+        time.sleep(delay)
+        status, final, body, headers = _fetch(u)
+        name = _safe_name(final, i)
+        (out / name).write_bytes(body)
+        text = body.decode("utf-8", "replace")
+        report["pages"].append(
+            {
+                "url": u,
+                "final_url": final,
+                "status": status,
+                "bytes": len(body),
+                "file": name,
+                "co_chu_dieu": "Điều 1" in text or "\\u0110i\\u1ec1u 1" in text,
+                "co_so_ky_hieu": bool(re.search(r"\d+/\d{4}/[A-ZĐ]", text)),
+            }
+        )
+
+    (out / "bao-cao.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out

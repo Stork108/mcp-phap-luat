@@ -89,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("thong-ke", help="thống kê kho và danh sách văn bản cần kiểm tra")
     p = sub.add_parser("khao-sat-vbpl", help="tải vài trang vbpl.vn để phân tích cấu trúc (chạy trên máy cá nhân)")
     p.add_argument("--so-trang", type=int, default=15)
+    p.add_argument("--buoc", type=int, default=1, choices=[1, 2], help="2: đọc sơ đồ trang và vài trang chi tiết")
     p = sub.add_parser("serve", help="chạy MCP server")
     p.add_argument("--http", action="store_true", help="chạy qua HTTP (cloud), cần PHAPLUAT_TOKEN")
     p.add_argument("--host", default="0.0.0.0")
@@ -106,9 +107,9 @@ def main(argv: list[str] | None = None) -> int:
         server.run_http(a.host, a.port) if a.http else server.run_stdio()
         return 0
     if a.cmd == "khao-sat-vbpl":
-        from .khaosat import chay
+        from .khaosat import chay, chay_buoc_2
 
-        out = chay(max_pages=a.so_trang)
+        out = chay_buoc_2() if a.buoc == 2 else chay(max_pages=a.so_trang)
         print(f"Đã lưu kết quả khảo sát vào thư mục: {out.resolve()}")
         print("Hãy nén thư mục này (chuột phải > Send to > Compressed folder) và gửi lại trong thread.")
         return 0
