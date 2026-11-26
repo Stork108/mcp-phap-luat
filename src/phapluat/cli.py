@@ -62,6 +62,50 @@ def nhap_tep(conn, path: str, meta: dict) -> tuple[int, list[str]]:
     return doc_id, [f"{meta['so_ky_hieu']}: {n_dieu} điều"] + notes
 
 
+def _thu_thap_vbpl(conn, a) -> int:
+    from .thuthap_vbpl import BoTai, ChiMucSitemap, LoiThuThap, thu_thap_url
+
+    nguon = list(a.nguon)
+    if a.tu_tep:
+        for line in Path(a.tu_tep).read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                nguon.append(line)
+    if not nguon:
+        print("Cần ít nhất một url trang chi tiết vbpl.vn hoặc một số ký hiệu (hoặc --tu-tep).")
+        return 1
+    bo_tai = BoTai(do_tre=a.do_tre, toi_da=a.toi_da)
+    chi_muc = ChiMucSitemap(default_db_path().parent / "vbpl-sitemap", bo_tai)
+    luu = Path(a.luu_html) if a.luu_html else None
+    ok = loi = 0
+    for n in nguon:
+        try:
+            if n.startswith("http"):
+                urls = [n]
+            else:
+                print(f"Tìm {n} trong sơ đồ trang vbpl.vn ...")
+                urls = chi_muc.tim(n)
+                if not urls:
+                    raise LoiThuThap(f"không thấy trang chi tiết nào có số ký hiệu {n} trong sơ đồ trang.")
+                if len(urls) > 1:
+                    raise LoiThuThap(
+                        f"có {len(urls)} trang cùng số ký hiệu {n}, hãy chọn một url:\n    " + "\n    ".join(urls)
+                    )
+            _, kq = thu_thap_url(conn, urls[0], bo_tai, luu)
+            print(
+                f"OK   {kq.meta['so_ky_hieu']} ({kq.meta.get('co_quan_ban_hanh', '')}): {kq.so_dieu} điều, "
+                f"{kq.meta.get('tinh_trang_nguon', 'chưa rõ tình trạng')}. {kq.meta['url_goc']}"
+            )
+            for c in kq.canh_bao:
+                print(f"     Cảnh báo: {c}")
+            ok += 1
+        except LoiThuThap as e:
+            print(f"LỖI {n}: {e}")
+            loi += 1
+    print(f"Xong: {ok} văn bản nhập được, {loi} lỗi. Đã tải {bo_tai.so_lan} trang.")
+    return 0 if loi == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="phapluat", description="Kho tra cứu văn bản pháp luật cá nhân")
     ap.add_argument("--db", help=f"đường dẫn tệp kho dữ liệu (mặc định {default_db_path()})")
@@ -90,6 +134,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("khao-sat-vbpl", help="tải vài trang vbpl.vn để phân tích cấu trúc (chạy trên máy cá nhân)")
     p.add_argument("--so-trang", type=int, default=15)
     p.add_argument("--buoc", type=int, default=1, choices=[1, 2], help="2: đọc sơ đồ trang và vài trang chi tiết")
+    p = sub.add_parser(
+        "thu-thap-vbpl",
+        help="tải toàn văn và thuộc tính từ trang chi tiết vbpl.vn (theo url hoặc số ký hiệu) rồi nhập vào kho",
+    )
+    p.add_argument("nguon", nargs="*", help="url https://vbpl.vn/van-ban/chi-tiet/... hoặc số ký hiệu, ví dụ 31/2024/QH15")
+    p.add_argument("--tu-tep", help="tệp chữ, mỗi dòng một url hoặc số ký hiệu (dòng bắt đầu bằng # bị bỏ qua)")
+    p.add_argument("--do-tre", type=float, default=4.0, help="số giây giữa hai lần tải (tối thiểu 4)")
+    p.add_argument("--toi-da", type=int, default=100, help="số lần tải tối đa trong một lần chạy (mặc định 100)")
+    p.add_argument("--luu-html", help="thư mục lưu nguyên trạng trang đã tải (để đối chiếu)")
     p = sub.add_parser("serve", help="chạy MCP server")
     p.add_argument("--http", action="store_true", help="chạy qua HTTP (cloud), cần PHAPLUAT_TOKEN")
     p.add_argument("--host", default="0.0.0.0")
@@ -115,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     conn = connect()
+    if a.cmd == "thu-thap-vbpl":
+        return _thu_thap_vbpl(conn, a)
     if a.cmd == "nhap":
         meta = {f: getattr(a, f) for f in FIELD_ARGS if getattr(a, f)}
         meta.setdefault("nguon", "thu-cong")
