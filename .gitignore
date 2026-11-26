@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+build/
+dist/
+# Kho dữ liệu và tệp tải về nằm ngoài git
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

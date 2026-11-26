@@ -1,0 +1,127 @@
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from phapluat import tools
+from phapluat.cli import nhap_tep
+from phapluat.db import connect
+from phapluat.parser import parse_text
+from phapluat.store import add_relation, upsert_document
+
+FIX = Path(__file__).parent / "fixtures" / "mau_nghi_dinh.txt"
+
+LOCAL = """ỦY BAN NHÂN DÂN TỈNH {tinh}
+Số: 01/2099/QĐ-UBND
+
+QUYẾT ĐỊNH
+Quy định mẫu của tỉnh {tinh}
+
+Điều 1. Nội dung
+Áp dụng trên địa bàn tỉnh {tinh}.
+"""
+
+
+@pytest.fixture()
+def conn(tmp_path):
+    c = connect(tmp_path / "t.db")
+    nhap_tep(c, str(FIX), {"tinh_trang_nguon": "Còn hiệu lực", "nguon": "kiem-thu", "linh_vuc": "Lao động"})
+    for tinh, goc in (("Bình Dương", "Bình Dương"), ("Đồng Nai", "Đồng Nai")):
+        upsert_document(
+            c,
+            {
+                "so_ky_hieu": "01/2099/QĐ-UBND",
+                "co_quan_ban_hanh": f"Ủy ban nhân dân tỉnh {tinh}",
+                "loai_van_ban": "Quyết định",
+                "trich_yeu": f"Quy định mẫu của tỉnh {tinh}",
+                "tinh_ban_hanh_goc": goc,
+                "tinh_hien_nay": "TP. Hồ Chí Minh" if tinh == "Bình Dương" else "Đồng Nai",
+                "ngay_hieu_luc": "2099-01-01",
+                "tinh_trang_nguon": "Còn hiệu lực",
+            },
+            parse_text(LOCAL.format(tinh=tinh)),
+        )
+    # Văn bản sửa đổi khoản 2 Điều 3 của nghị định mẫu
+    amend = upsert_document(
+        c,
+        {
+            "so_ky_hieu": "1000/2099/NĐ-CP",
+            "co_quan_ban_hanh": "Chính phủ",
+            "loai_van_ban": "Nghị định",
+            "trich_yeu": "Sửa đổi nghị định mẫu",
+            "ngay_hieu_luc": "2099-06-01",
+            "tinh_trang_nguon": "Còn hiệu lực",
+        },
+        parse_text("Điều 1. Sửa đổi khoản 2 Điều 3\nNội dung sửa đổi."),
+    )
+    add_relation(c, amend, "sua_doi", "999/2099/NĐ-CP", None, "Điều 1", "khoản 2 Điều 3")
+    yield c
+    c.close()
+
+
+def test_status_uses_dates(conn, monkeypatch):
+    # Năm 2099 chưa đến: nguồn ghi 'Còn hiệu lực' nhưng ngày hiệu lực chưa tới -> Cần kiểm tra
+    out = tools.kiem_tra_hieu_luc(conn, ["999/2099/NĐ-CP"])
+    assert "Tình trạng hiệu lực: Cần kiểm tra" in out
+    assert "sửa đổi, bổ sung (khoản 2 Điều 3): 1000/2099/NĐ-CP" in out
+
+
+def test_search_accent_insensitive(conn):
+    out = tools.tim_van_ban(conn, "tro cap thoi viec", bao_gom_het_hieu_luc=True)
+    assert "999/2099/NĐ-CP" in out
+    assert "Điều 3" in out
+    assert "Trích:" in out
+
+
+def test_exact_number_only(conn):
+    assert "Không tìm thấy" in tools.tim_van_ban(conn, "998/2099/NĐ-CP")
+    assert "Không tìm thấy" in tools.xem_muc_luc(conn, "998/2099/NĐ-CP")
+
+
+def test_duplicate_number_lists_both(conn):
+    out = tools.xem_muc_luc(conn, "01/2099/QĐ-UBND")
+    assert "Có 2 văn bản khớp" in out
+    assert "Bình Dương" in out and "Đồng Nai" in out
+    one = tools.xem_muc_luc(conn, "01/2099/QĐ-UBND", co_quan="Đồng Nai")
+    assert "Có 2" not in one and "Đồng Nai" in one
+
+
+def test_local_merger_note(conn):
+    out = tools.xem_muc_luc(conn, "01/2099/QĐ-UBND", co_quan="Bình Dương")
+    assert "Văn bản của tỉnh Bình Dương trước sắp xếp; nay thuộc TP. Hồ Chí Minh." in out
+
+
+def test_quote_article_verbatim_with_warning(conn):
+    out = tools.trich_dieu_khoan(conn, "999/2099/NĐ-CP", "3", khoan="2")
+    assert "2. Mỗi năm làm việc được trợ cấp một nửa tháng tiền lương." in out
+    assert "CẢNH BÁO" in out and "1000/2099/NĐ-CP" in out
+    out = tools.trich_dieu_khoan(conn, "999/2099/NĐ-CP", "2", khoan="3", diem="b")
+    assert out.rstrip().endswith("đ) Dòng này không đúng thứ tự nên không được nhận là điểm.")
+    assert "không có khoản 9" in tools.trich_dieu_khoan(conn, "999/2099/NĐ-CP", "2", khoan="9")
+
+
+def test_toc_and_fulltext(conn):
+    toc = tools.xem_muc_luc(conn, "999/2099/NĐ-CP")
+    assert "Mục lục (4 điều)" in toc and "Chương II: TRỢ CẤP" in toc
+    full = tools.lay_toan_van(conn, "999/2099/NĐ-CP")
+    assert "trang 1/1" in full and "PHỤ LỤC I" in full
+
+
+def test_compliance_and_related(conn):
+    out = tools.tra_cuu_tuan_thu(conn, "người lao động làm 12 tháng có được trợ cấp thôi việc không")
+    # Văn bản 2099 chưa có hiệu lực -> vẫn trả về vì tình trạng 'Cần kiểm tra', không phải 'Chưa có hiệu lực'
+    assert "Điều 3" in out
+    rel = tools.van_ban_lien_quan(conn, "999/2099/NĐ-CP")
+    assert "1000/2099/NĐ-CP" in rel
+
+
+def test_status_logic():
+    from phapluat.status import tinh_trang
+
+    d = {"tinh_trang_nguon": "Còn hiệu lực", "ngay_hieu_luc": "2020-01-01"}
+    assert tinh_trang(d, date(2026, 1, 1)) == ("Còn hiệu lực", None)
+    d = {"tinh_trang_nguon": "Còn hiệu lực", "ngay_hieu_luc": "2020-01-01", "ngay_het_hieu_luc": "2025-07-01"}
+    assert tinh_trang(d, date(2026, 1, 1))[0] == "Cần kiểm tra"
+    d = {"tinh_trang_nguon": "Hết hiệu lực toàn bộ", "ngay_het_hieu_luc": "2025-07-01"}
+    assert tinh_trang(d, date(2026, 1, 1))[0] == "Hết hiệu lực toàn bộ"
+    assert tinh_trang({}, date(2026, 1, 1))[0] == "Cần kiểm tra"
