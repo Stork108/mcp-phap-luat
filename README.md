@@ -12,7 +12,7 @@ Bản đặc tả: <https://claude.ai/artifact/Un2rHJ1M63b6XZveyEvpVa>
 | Tách cấu trúc Chương/Mục/Điều/Khoản/Điểm/Phụ lục, giữ nguyên văn | Xong, đã kiểm thử trên văn bản mẫu |
 | 7 chức năng MCP | Xong, đã kiểm thử |
 | Nhập văn bản từ tệp .docx, .txt, .html, .pdf | Xong |
-| Thu thập tự động từ vbpl.vn | Chưa có: cần chạy lệnh khảo sát (bước 4) để em viết |
+| Thu thập tự động từ vbpl.vn (`phapluat thu-thap-vbpl`) | Xong, đã thử trên Luật Doanh nghiệp, Bộ luật Lao động, Luật Đất đai |
 
 ## Cài đặt trên Windows
 
@@ -43,21 +43,37 @@ py -m venv .venv
 
 Lệnh cuối hiện danh sách lệnh là cài thành công.
 
-### 4. Khảo sát vbpl.vn (để em viết bộ thu thập tự động)
+### 4. Thu thập văn bản từ vbpl.vn
+
+Theo số ký hiệu:
 
 ```powershell
-.venv\Scripts\phapluat khao-sat-vbpl
+.venv\Scripts\phapluat thu-thap-vbpl 59/2020/QH14 45/2019/QH14 31/2024/QH15
 ```
 
-Lệnh tải khoảng 15 trang, mỗi trang cách nhau 4 giây, tôn trọng robots.txt, rồi lưu vào thư mục `C:\mcp-phap-luat\khao-sat-vbpl`. Chị nén thư mục đó (chuột phải > Send to > Compressed (zipped) folder) và gửi lại trong thread.
-
-Bước 2 của khảo sát (đọc sơ đồ trang `sitemap.xml` và 4 trang chi tiết văn bản; không gọi `/api/` và `/Pages/` vì robots.txt của vbpl.vn không cho phép):
+Hoặc theo đường dẫn trang chi tiết (dạng `https://vbpl.vn/van-ban/chi-tiet/...--<mã>`, bản tiếng Anh `/en/...` cũng được):
 
 ```powershell
-.venv\Scripts\phapluat khao-sat-vbpl --buoc 2
+.venv\Scripts\phapluat thu-thap-vbpl "https://vbpl.vn/van-ban/chi-tiet/luat-dat-dai-so-31-2024-qh15--177815"
 ```
 
-Kết quả nằm trong thư mục `khao-sat-vbpl-2`.
+Nhiều văn bản một lúc: ghi vào một tệp chữ, mỗi dòng một số ký hiệu hoặc một đường dẫn (dòng bắt đầu bằng `#` bị bỏ qua), rồi:
+
+```powershell
+.venv\Scripts\phapluat thu-thap-vbpl --tu-tep danh-sach.txt
+```
+
+Cách hoạt động:
+
+- Trang chi tiết của vbpl.vn có sẵn toàn văn và thuộc tính trong HTML máy chủ trả về. Công cụ đọc số ký hiệu, loại văn bản, cơ quan ban hành, ngày ban hành, ngày có hiệu lực, ngày hết hiệu lực, tình trạng hiệu lực và lĩnh vực từ đó, ghi `nguon = vbpl.vn`, đường dẫn gốc và ngày kiểm tra (ngày tải).
+- Toàn văn được giữ nguyên chữ, chỉ bỏ thẻ HTML, rồi tách Chương/Điều/Khoản/Điểm như khi nhập tệp.
+- Tìm theo số ký hiệu: công cụ đọc sơ đồ trang (`sitemap.xml`) của vbpl.vn và lưu lại trong `data\vbpl-sitemap` để lần sau không tải lại. Lần đầu có thể phải đọc vài sơ đồ trang (mỗi tệp khoảng 4 MB). Nếu nhiều trang cùng số ký hiệu (thường gặp với văn bản địa phương), công cụ liệt kê các đường dẫn để chị chọn. Muốn cập nhật danh sách văn bản mới, xóa thư mục `data\vbpl-sitemap`.
+- Lịch sự với máy chủ: mỗi lần tải cách nhau ít nhất 4 giây (`--do-tre` để tăng), tối đa 100 lần tải mỗi lần chạy (`--toi-da`), tôn trọng robots.txt, **không bao giờ** gọi `/api/` và `/Pages/`.
+- `--luu-html <thư mục>` lưu nguyên trạng trang đã tải để đối chiếu.
+- Cảnh báo được ghi vào kho (và hiện khi tra cứu) khi: văn bản nhắc phụ lục kèm theo mà trang không có phụ lục; trang có tệp đính kèm chưa nhập; thiếu trường thông tin; tình trạng hiệu lực lạ (ví dụ "tạm ngưng"); không thấy số ký hiệu ở phần đầu toàn văn; văn bản địa phương (công cụ tự ghi tỉnh ban hành gốc theo tên cơ quan, nhưng không tự đoán tỉnh hiện nay sau sắp xếp và phạm vi áp dụng).
+- Trang chỉ có bản PDF/scan (không có toàn văn dạng chữ) sẽ báo lỗi; khi đó tải tệp về và dùng `phapluat nhap`.
+
+Lệnh khảo sát cũ (`phapluat khao-sat-vbpl`) vẫn giữ để chẩn đoán khi vbpl.vn đổi cấu trúc.
 
 ### Cập nhật mã nguồn khi có bản mới
 
