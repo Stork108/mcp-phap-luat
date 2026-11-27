@@ -181,3 +181,36 @@ def test_xoa_van_ban(conn):
     assert len(find_documents(conn, "01/2099/QĐ-UBND")) == 1
     assert "Đồng Nai" not in tools.tim_van_ban(conn, "quy dinh mau", pham_vi="tat_ca", bao_gom_het_hieu_luc=True)
     assert conn.execute("SELECT count(*) FROM changelog WHERE su_kien = 'xoa'").fetchone()[0] == 1
+
+
+def test_hoi_tinh_cu_ra_van_ban_tinh_moi_sau_sap_xep(conn):
+    upsert_document(
+        conn,
+        {
+            "so_ky_hieu": "87/2099/NQ-HĐND",
+            "co_quan_ban_hanh": "HĐND Thành phố Hồ Chí Minh",
+            "trich_yeu": "Quy định mẫu bảng giá đất",
+            "tinh_ban_hanh_goc": "Hồ Chí Minh",
+            "tinh_hien_nay": "Hồ Chí Minh",
+            "ngay_ban_hanh": "2025-12-01",
+            "tinh_trang_nguon": "Còn hiệu lực",
+        },
+        parse_text("Điều 1. Quy định mẫu bảng giá đất trên địa bàn Thành phố."),
+    )
+    upsert_document(
+        conn,
+        {
+            "so_ky_hieu": "01/2020/NQ-HĐND",
+            "co_quan_ban_hanh": "HĐND Thành phố Hồ Chí Minh",
+            "trich_yeu": "Quy định mẫu cũ của Thành phố",
+            "tinh_ban_hanh_goc": "Hồ Chí Minh",
+            "tinh_hien_nay": "Hồ Chí Minh",
+            "ngay_ban_hanh": "2020-01-15",
+            "tinh_trang_nguon": "Còn hiệu lực",
+        },
+        parse_text("Điều 1. Quy định mẫu cũ."),
+    )
+    out = tools.tim_van_ban(conn, "quy dinh mau", tinh="Bình Dương", bao_gom_het_hieu_luc=True)
+    assert "87/2099/NQ-HĐND" in out  # văn bản TP.HCM sau sắp xếp áp dụng cho địa bàn Bình Dương cũ
+    assert "01/2020/NQ-HĐND" not in out  # văn bản TP.HCM cũ chỉ áp dụng địa bàn TP.HCM cũ
+    assert "tỉnh Bình Dương" in out and "tỉnh Đồng Nai" not in out

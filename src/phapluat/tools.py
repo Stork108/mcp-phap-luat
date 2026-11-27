@@ -162,10 +162,31 @@ def la_dia_phuong(doc) -> bool:
     return bool(_RE_CQ_DIA_PHUONG.search(bo_dau(doc["co_quan_ban_hanh"] or "")))
 
 
+# Tỉnh cũ -> tỉnh, thành phố hiện nay theo khoản 16, 17, 18 Điều 1 Nghị quyết 202/2025/QH15
+# (chỉ ghi các trường hợp đã đối chiếu nguyên văn; bổ sung khi nạp thêm tỉnh).
+TINH_CU_SANG_MOI = {
+    "binh duong": "ho chi minh",
+    "ba ria vung tau": "ho chi minh",
+    "ba ria - vung tau": "ho chi minh",
+    "binh phuoc": "dong nai",
+    "long an": "tay ninh",
+}
+
+
+NGAY_SAP_XEP = "2025-07-01"  # Nghị quyết 202/2025/QH15 có hiệu lực
+
+
 def _khop_tinh(doc, tinh: str) -> bool:
-    return bo_dau(tinh) in bo_dau(
-        f"{doc['tinh_ban_hanh_goc'] or ''} {doc['tinh_hien_nay'] or ''} {doc['co_quan_ban_hanh'] or ''}"
-    )
+    t = bo_dau(tinh).replace("–", "-").strip()
+    if t in bo_dau(f"{doc['tinh_ban_hanh_goc'] or ''} {doc['tinh_hien_nay'] or ''} {doc['co_quan_ban_hanh'] or ''}"):
+        return True
+    # Hỏi theo tỉnh cũ: thêm văn bản do chính quyền tỉnh, thành phố hiện nay ban hành từ ngày sắp xếp
+    # (áp dụng cho cả địa bàn tỉnh cũ). Văn bản của tỉnh mới ban hành trước đó chỉ áp dụng địa bàn cũ của nó.
+    moi = TINH_CU_SANG_MOI.get(t)
+    if not moi:
+        return False
+    goc = bo_dau(doc["tinh_ban_hanh_goc"] or doc["tinh_hien_nay"] or "")
+    return moi in goc and (doc["ngay_ban_hanh"] or "") >= NGAY_SAP_XEP
 
 
 def _dat_pham_vi(conn, pham_vi: str, tinh: str | None) -> str:
@@ -179,7 +200,9 @@ def _dat_pham_vi(conn, pham_vi: str, tinh: str | None) -> str:
     if pham_vi == "tat_ca" and not tinh:
         return ""
     ids = []
-    for d in conn.execute("SELECT id, co_quan_ban_hanh, tinh_hien_nay, tinh_ban_hanh_goc FROM documents"):
+    for d in conn.execute(
+        "SELECT id, co_quan_ban_hanh, tinh_hien_nay, tinh_ban_hanh_goc, ngay_ban_hanh FROM documents"
+    ):
         dp = la_dia_phuong(d)
         if pham_vi == "trung_uong":
             ok = not dp
