@@ -99,10 +99,12 @@ def _ngoai_ngoac_kep(lines: list[str]) -> list[tuple[int, str]]:
 
 
 RE_TOKEN = re.compile(
-    r"(?P<diem>(?:điểm|Điểm)\s+[a-zđ](?:\.\d+)?(?![\w])(?:\s*(?:,|và)\s*(?:điểm\s+)?[a-zđ](?:\.\d+)?(?![\w]))*)"
+    r"(?P<khac>(?:(?:khoản|Khoản)\s+\d+[a-zđ]?\s+)?(?:(?:Tiểu mục|tiểu mục|Mục|mục)\s+[IVXLC\d]+\s+(?:của\s+)?)?"
+    r"(?:(?:Chương|Phần|Phụ lục)\s+[IVXLC\d]+[A-Z]?\b(?:\s+(?:của\s+)?(?:Phần|Chương)\s+[IVXLC\d]+\b)?"
+    r"|(?:Mục|Tiểu mục)\s+[IVXLC\d]+\s+(?:của\s+)?(?:Chương|Phần|Phụ lục)\s+[IVXLC\d]+\b))"
+    r"|(?P<diem>(?:điểm|Điểm)\s+[a-zđ](?:\.\d+)?(?![\w])(?:\s*(?:,|và)\s*(?:điểm\s+)?[a-zđ](?:\.\d+)?(?![\w]))*)"
     r"|(?P<khoan>(?:khoản|Khoản)\s+\d+[a-zđ]?(?:\s*(?:,|và)\s*(?:khoản\s+)?\d+[a-zđ]?(?![\w]))*)"
     r"|(?P<dieu>(?:Điều|điều)\s+\d+[a-zđ]?)"
-    r"|(?P<khac>(?:Chương|Phụ lục|Mục)\s+[IVXLC]+[A-Z]?\b|(?:Chương|Phụ lục)\s+\d+\b)"
 )
 
 
@@ -120,7 +122,7 @@ def _vi_tri_trong(text: str, dieu_mac_dinh: str | None = None) -> list[str]:
 
     for m in RE_TOKEN.finditer(text):
         if m.group("khac"):
-            out.append(m.group("khac"))
+            out.append(re.sub(r"\s+", " ", m.group("khac")).strip())
             cho_khoan, cho_diem = [], []
         elif m.group("diem"):
             cho_diem += re.findall(r"(?<![\w.])[a-zđ](?:\.\d+)?(?![\w])", m.group("diem").split(None, 1)[1])
@@ -185,8 +187,12 @@ def tach_muc_van_ban(part: str) -> list[tuple[str, str]]:
             ok = False
         elif RE_TEN_SUA_DOI.search(seg):
             ok, seg = True, ""
-        elif RE_LOAI.search(seg) or RE_DONG_TU_MO_TA.search(seg):
+        elif RE_LOAI.search(seg):
             ok = False
+        elif RE_DONG_TU_MO_TA.search(seg):
+            # có động từ mô tả: chỉ nhận khi nối bằng 'và', 'hoặc', ';' (văn bản ngang hàng), không nhận vị trí
+            ok = re.search(r"(?:\bvà|\bhoặc|;)\s*$", seg) is not None
+            seg = ""
         else:
             s2 = re.sub(r"\s*(?:của|tại)\s*$", "", seg).rstrip()
             ok = s2 == "" or re.search(r"(?:,|:|\bvà|\bhoặc)$", s2) is not None or bool(
@@ -327,7 +333,9 @@ def doc_van_ban(conn: sqlite3.Connection, doc: sqlite3.Row) -> list[QuanHe]:
     out: list[QuanHe] = []
 
     so_ty = [s for s in tach_so(ty) if chuan_hoa_so_ky_hieu(s) != ban_than]
-    la_sua_doi = bool(re.search(r"sửa đổi|bổ sung|bãi bỏ", ty, re.I))
+    # Văn bản sửa đổi: trích yếu bắt đầu bằng 'Sửa đổi', 'Bổ sung', 'Bãi bỏ', 'Đính chính'
+    # (không tính 'Hướng dẫn ... Nghị định số X sửa đổi, bổ sung ...').
+    la_sua_doi = bool(re.match(r"\s*(?:" + _LOAI + r"\s+)?(?:sửa đổi|bổ sung|bãi bỏ|đính chính)", ty, re.I))
     so_dich_mac_dinh = so_ty[0] if (la_sua_doi and len(so_ty) == 1) else None
 
     for u in units:
@@ -366,7 +374,13 @@ def doc_van_ban(conn: sqlite3.Connection, doc: sqlite3.Row) -> list[QuanHe]:
 
     # bỏ trùng, bỏ tự trỏ về chính mình, bỏ dòng không vị trí khi đã có dòng có vị trí cùng loại, cùng đích
     co_vt = {(q.loai, chuan_hoa_so_ky_hieu(q.dst_so), q.src_vi_tri) for q in out if q.dst_vi_tri}
-    out = [q for q in out if q.dst_vi_tri or (q.loai, chuan_hoa_so_ky_hieu(q.dst_so), q.src_vi_tri) not in co_vt]
+    out = [
+        q
+        for q in out
+        if q.dst_vi_tri
+        or q.loai in ("het_hieu_luc", "thay_the")  # hết hiệu lực toàn bộ khác với một phần: giữ cả hai
+        or (q.loai, chuan_hoa_so_ky_hieu(q.dst_so), q.src_vi_tri) not in co_vt
+    ]
     seen = set()
     res = []
     for q in out:

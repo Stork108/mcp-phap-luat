@@ -223,3 +223,14 @@ b) Bãi bỏ điểm a.4 khoản 10 như sau:"""
     vt = {(q.loai, q.dst_vi_tri) for q in doc_sua_doi("219", dieu, None)}
     assert {("sua_doi", "khoản 1 Điều 32"), ("sua_doi", "khoản 1a Điều 32"), ("sua_doi", "khoản 1c Điều 32")} <= vt
     assert ("bai_bo", "điểm a.4 khoản 10 Điều 32") in vt
+
+
+def test_vong_4_va_noi_van_ban_ngang_hang_vi_tri_muc_chuong():
+    dieu = """Điều 99. Hiệu lực thi hành
+3. Thông tư này bãi bỏ:
+g) Thông tư số 19/2097/TT-BTC ngày 18 tháng 3 năm 2097 hướng dẫn giao dịch điện tử trong lĩnh vực thuế và Thông tư số 46/2098/TT-BTC ngày 09 tháng 7 năm 2098 sửa đổi, bổ sung một số điều của Thông tư số 19/2097/TT-BTC."""
+    vt = {(q.loai, q.dst_so) for q in doc_hieu_luc("99", dieu)}
+    assert vt == {("bai_bo", "19/2097/TT-BTC"), ("bai_bo", "46/2098/TT-BTC")}
+    assert _vi_tri_trong("Sửa đổi, bổ sung tên Mục 2 Chương II") == ["Mục 2 Chương II"]
+    assert _vi_tri_trong("Sửa đổi, bổ sung khoản 16 Mục I Phần IV") == ["khoản 16 Mục I Phần IV"]
+    assert _vi_tri_trong("mục VII của Phụ lục III") == ["mục VII của Phụ lục III"]
