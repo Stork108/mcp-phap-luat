@@ -64,7 +64,7 @@ def nhap_tep(conn, path: str, meta: dict) -> tuple[int, list[str]]:
 
 def _thu_thap_vbpl(conn, a) -> int:
     from .quanhe import ghi_quan_he
-    from .thuthap_vbpl import BoTai, ChiMucSitemap, LoiThuThap, thu_thap_url
+    from .thuthap_vbpl import BoQuaHetHieuLuc, BoTai, ChiMucSitemap, LoiThuThap, thu_thap_url
 
     nguon = list(a.nguon)
     if a.tu_tep:
@@ -78,7 +78,11 @@ def _thu_thap_vbpl(conn, a) -> int:
     bo_tai = BoTai(do_tre=a.do_tre, toi_da=a.toi_da)
     chi_muc = ChiMucSitemap(default_db_path().parent / "vbpl-sitemap", bo_tai)
     luu = Path(a.luu_html) if a.luu_html else None
-    ok = loi = 0
+    ok = loi = bo_qua = 0
+    ds_bo_qua = Path(a.ds_bo_qua) if a.ds_bo_qua else None
+    if ds_bo_qua and not ds_bo_qua.exists():
+        ds_bo_qua.write_text("so_ky_hieu\tco_quan_ban_hanh\ttinh_hien_nay\tngay_ban_hanh\tngay_het_hieu_luc\turl\n",
+                             encoding="utf-8")
     for n in nguon:
         try:
             if n.startswith("http"):
@@ -92,7 +96,14 @@ def _thu_thap_vbpl(conn, a) -> int:
                     raise LoiThuThap(
                         f"có {len(urls)} trang cùng số ký hiệu {n}, hãy chọn một url:\n    " + "\n    ".join(urls)
                     )
-            doc_id, kq = thu_thap_url(conn, urls[0], bo_tai, luu, so_mong_doi=None if n.startswith("http") else n)
+            doc_id, kq = thu_thap_url(
+                conn,
+                urls[0],
+                bo_tai,
+                luu,
+                so_mong_doi=None if n.startswith("http") else n,
+                bo_qua_het_hieu_luc=a.chi_con_hieu_luc,
+            )
             qh = ghi_quan_he(conn, [doc_id]).get(doc_id, [])
             print(
                 f"OK   {kq.meta['so_ky_hieu']} ({kq.meta.get('co_quan_ban_hanh', '')}): {kq.so_dieu} điều, "
@@ -101,10 +112,21 @@ def _thu_thap_vbpl(conn, a) -> int:
             for c in kq.canh_bao:
                 print(f"     Cảnh báo: {c}")
             ok += 1
+        except BoQuaHetHieuLuc as e:
+            print(f"BỎ QUA {e}")
+            if ds_bo_qua:
+                m = e.kq.meta
+                with ds_bo_qua.open("a", encoding="utf-8") as f:
+                    f.write("\t".join(str(m.get(k, "")) for k in
+                                      ("so_ky_hieu", "co_quan_ban_hanh", "tinh_hien_nay", "ngay_ban_hanh",
+                                       "ngay_het_hieu_luc")) + f"\t{e.url}\n")
+            bo_qua += 1
         except LoiThuThap as e:
             print(f"LỖI {n}: {e}")
             loi += 1
-    print(f"Xong: {ok} văn bản nhập được, {loi} lỗi. Đã tải {bo_tai.so_lan} trang.")
+    print(
+        f"Xong: {ok} văn bản nhập được, {bo_qua} bỏ qua vì hết hiệu lực, {loi} lỗi. Đã tải {bo_tai.so_lan} trang."
+    )
     return 0 if loi == 0 else 1
 
 
@@ -152,6 +174,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--do-tre", type=float, default=4.0, help="số giây giữa hai lần tải (tối thiểu 4)")
     p.add_argument("--toi-da", type=int, default=100, help="số lần tải tối đa trong một lần chạy (mặc định 100)")
     p.add_argument("--luu-html", help="thư mục lưu nguyên trạng trang đã tải (để đối chiếu)")
+    p.add_argument(
+        "--chi-con-hieu-luc",
+        action="store_true",
+        help="không nhập văn bản vbpl.vn ghi hết hiệu lực toàn bộ (vẫn tốn một lần tải để biết tình trạng)",
+    )
+    p.add_argument("--ds-bo-qua", help="tệp TSV ghi thêm các văn bản bị bỏ qua vì hết hiệu lực (để tìm bản liền trước)")
     p = sub.add_parser("serve", help="chạy MCP server")
     p.add_argument("--http", action="store_true", help="chạy qua HTTP (cloud), cần PHAPLUAT_TOKEN")
     p.add_argument("--host", default="0.0.0.0")
