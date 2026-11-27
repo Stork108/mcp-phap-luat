@@ -147,7 +147,7 @@ def test_khong_nham_quy_dinh_chuyen_tiep_cum_tu_mau_bieu():
 4. Thông tư này thay thế mẫu số 01/TKN-CNKD kèm theo Thông tư số 50/2099/TT-BTC.
 5. Bãi bỏ Thông tư số 49/2099/TT-BTC."""
     vt = {(q.loai, q.dst_so, q.dst_vi_tri) for q in doc_hieu_luc("24", dieu)}
-    assert vt == {("bai_bo", "49/2099/TT-BTC", None)}
+    assert vt == {("bai_bo", "49/2099/TT-BTC", None), ("sua_doi", "50/2099/TT-BTC", "mẫu số 01/TKN-CNKD")}
 
 
 def test_so_ky_hieu_co_dau_cach_va_mau_bieu():
@@ -157,3 +157,38 @@ def test_so_ky_hieu_co_dau_cach_va_mau_bieu():
     assert tach_so("Bổ sung Mẫu số 01/BK-ĐCTT, Mẫu số 01/TH-DT vào Phụ lục IA") == []
     assert tach_so("văn bản số 716/UBTVQH13-CVĐXH") == []
     assert tach_so("hợp nhất số 18/VBHN-VPQH") == ["18/VBHN-VPQH"]
+
+
+def test_danh_sach_bai_bo_nhieu_van_ban_va_mo_ta():
+    dieu = """Điều 38. Hiệu lực thi hành
+1. Nghị định này có hiệu lực từ ngày 01 tháng 7 năm 2099. Khoản 9 Điều 60 của Luật này có hiệu lực thi hành từ ngày Nghị quyết số 61/2098/QH99 hết hiệu lực.
+2. Nghị định số 163/2098/NĐ-CP ngày 29 tháng 12 năm 2098 của Chính phủ về giao dịch bảo đảm, Nghị định số 11/2099/NĐ-CP ngày 22 tháng 02 năm 2099 của Chính phủ sửa đổi Nghị định số 163/2098/NĐ-CP và Nghị định số 15/2099/NĐ-CP hết hiệu lực kể từ ngày Nghị định này có hiệu lực thi hành.
+3. Bãi bỏ quy định tại:
+a) Điều 2 Nghị định số 91/2098/NĐ-CP ngày 01 tháng 10 năm 2098;
+b) Điều 3 Nghị định số 12/2099/NĐ-CP.
+4. Các khoản 1, 3 Điều 7 và khoản 2 Điều 8 của Nghị định số 135/2098/NĐ-CP hết hiệu lực.
+5. Bãi bỏ quy định về ưu đãi tại Điều 6 Nghị định số 69/2098/NĐ-CP."""
+    vt = {(q.loai, q.dst_so, q.dst_vi_tri) for q in doc_hieu_luc("38", dieu)}
+    assert vt == {
+        ("het_hieu_luc", "163/2098/NĐ-CP", None),
+        ("het_hieu_luc", "11/2099/NĐ-CP", None),
+        ("bai_bo", "91/2098/NĐ-CP", "Điều 2"),
+        ("bai_bo", "12/2099/NĐ-CP", "Điều 3"),
+        ("het_hieu_luc", "135/2098/NĐ-CP", "khoản 1 Điều 7"),
+        ("het_hieu_luc", "135/2098/NĐ-CP", "khoản 3 Điều 7"),
+        ("het_hieu_luc", "135/2098/NĐ-CP", "khoản 2 Điều 8"),
+        ("bai_bo", "69/2098/NĐ-CP", "Điều 6"),
+    }
+
+
+def test_thay_cum_tu_ghi_sua_doi_vi_tri_ngoai_ngoac_kep():
+    dieu = """Điều 217. Sửa đổi, bổ sung một số điều của luật có liên quan
+3. Thay thế cụm từ "doanh nghiệp nhà nước" bằng cụm từ "doanh nghiệp mẫu" quy định tại điểm m khoản 1 Điều 35 và điểm k khoản 1 Điều 37 của Luật Ngân sách nhà nước số 83/2098/QH99; khoản 2 Điều 4 của Luật Quản lý thử số 08/2099/QH99.
+4. Thay thế, bãi bỏ các điểm, khoản, cụm từ tại Nghị định số 71/2098/NĐ-CP như sau:
+- Cụm từ "khoản 4 Điều 68 Nghị định số 102/2098/NĐ-CP" bằng cụm từ "Điều 5" tại điểm b khoản 2 Điều 94."""
+    vt = {(q.loai, q.dst_so, q.dst_vi_tri) for q in doc_sua_doi("217", dieu, None)}
+    assert ("sua_doi", "83/2098/QH99", "điểm m khoản 1 Điều 35") in vt
+    assert ("sua_doi", "83/2098/QH99", "điểm k khoản 1 Điều 37") in vt
+    assert ("sua_doi", "08/2099/QH99", "khoản 2 Điều 4") in vt
+    assert ("sua_doi", "71/2098/NĐ-CP", "điểm b khoản 2 Điều 94") in vt
+    assert not any(q[1] == "102/2098/NĐ-CP" for q in vt)

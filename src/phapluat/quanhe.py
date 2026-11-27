@@ -150,63 +150,135 @@ def _loai_tu_dong_tu(dong_tu: str) -> str:
     return "sua_doi"
 
 
+RE_LOAI = re.compile(_LOAI)
+RE_LOAI_CUOI = re.compile(_LOAI + r"(?:\s+[^\d;]{0,100}?)?\s+(?:số\s+)?$")
+
+
+def tach_muc_van_ban(part: str) -> list[tuple[str, str]]:
+    """Các văn bản bị tác động trong một mệnh đề, kèm đoạn chữ đứng trước (chứa vị trí Điều/Khoản).
+
+    Văn bản đầu tiên luôn được nhận. Văn bản sau chỉ được nhận khi văn bản liền trước được nhận
+    và giữa hai văn bản là dấu phẩy, 'và', 'hoặc', hoặc một vị trí ('khoản 2 Điều 8 của ...').
+    Văn bản được nhắc trong phần mô tả ('... sửa đổi, bổ sung một số điều của Nghị định số X') bị bỏ."""
+    out: list[tuple[str, str]] = []
+    prev_end = 0
+    prev_ok = True
+    for idx, m in enumerate(RE_SO.finditer(part)):
+        so = m.group(1)
+        if so not in tach_so(part[max(0, m.start() - 30) : m.end()]):
+            continue
+        truoc = part[prev_end : m.start()]
+        lm = RE_LOAI_CUOI.search(truoc)
+        seg = truoc[: lm.start()] if lm else truoc
+        if not out and prev_end == 0:
+            ok = True
+        else:
+            s2 = re.sub(r"\s*(?:của|tại)\s*$", "", seg).rstrip()
+            ok = prev_ok and (
+                s2 == ""
+                or re.search(r"(?:,|;|:|\bvà|\bhoặc)$", s2) is not None
+                or re.search(r"(?:Điều|điều)\s+\d+[a-zđ]?$", s2) is not None
+            )
+            if ok and re.search(r"(?:,|\bvà|\bhoặc)$", s2) and not re.search(r"(?:Điều|điều)\s+\d", seg):
+                seg = ""
+        if ok:
+            out.append((so, seg))
+        prev_ok = ok
+        prev_end = m.end()
+    return out
+
+
+RE_LENH_CON = re.compile(r"^\s*(?:[a-zđ]\)|[-–+])\s*(Cụm từ|cụm từ|Thay thế|Thay|Bãi bỏ|Sửa đổi|Bổ sung)\b")
+
+
 def doc_sua_doi(dieu_so: str, dieu_text: str, so_dich_mac_dinh: str | None) -> list[QuanHe]:
-    """Đọc lệnh sửa đổi trong một Điều của văn bản sửa đổi."""
+    """Đọc lệnh sửa đổi, bổ sung, bãi bỏ, thay cụm từ trong một Điều.
+    Văn bản đích: văn bản nêu trong lệnh (ngoài ngoặc kép), nếu không có thì văn bản nêu ở lệnh cha
+    hoặc ở tên Điều, hoặc văn bản mặc định (từ trích yếu của văn bản sửa đổi)."""
     lines = dieu_text.split("\n")
     tieu_de = lines[0] if lines else ""
     so_tieu_de = tach_so(tieu_de)
     so_dich = so_tieu_de[0] if so_tieu_de else so_dich_mac_dinh
+    ctx_dich = so_dich
     out: list[QuanHe] = []
     dieu_cha: str | None = None
     for i, line in _ngoai_ngoac_kep(lines):
         if i == 0:
             continue
-        m = RE_LENH_SUA.match(line)
+        la_cha = bool(re.match(r"^\s*\d+[a-zđ]?\.", line))
+        if la_cha:
+            ctx_dich, dieu_cha = so_dich, None
+        m = RE_LENH_SUA.match(line) or RE_LENH_CON.match(line)
         if not m:
             continue
-        cau = re.split(r"\bnhư sau\b|:", line)[0]
-        so_trong = tach_so(cau)
-        dich = so_trong[0] if so_trong else so_dich
-        if not dich:
-            continue
-        # Chỉ lấy phần vị trí trước tên văn bản đích (nếu có)
-        truoc = re.split(_LOAI + r"\s+số", cau)[0] if so_trong else cau
-        la_cha = bool(re.match(r"^\s*\d+[a-zđ]?\.", line))
-        vts = _vi_tri_trong(truoc, None if la_cha else dieu_cha)
-        if la_cha:
-            ds = RE_DIEU.findall(truoc)
-            dieu_cha = ds[-1] if ds else None
         loai = _loai_tu_dong_tu(m.group(1))
-        if bo_dau(m.group(1)).startswith("thay") and not vts:
-            continue
-        for vt in vts or [None]:
-            out.append(QuanHe(loai, dich, vt, f"Điều {dieu_so}", _cat(line)))
+        cau = re.split(r"\bnhư sau\b|:\s*$", line)[0]
+        co_dich_rieng = False
+        for part in cau.split(";"):
+            items = tach_muc_van_ban(part)
+            if items:
+                co_dich_rieng = True
+                for so, seg in items:
+                    for vt in _vi_tri_trong(seg) or [None]:
+                        out.append(QuanHe(loai, so, vt, f"Điều {dieu_so}", _cat(line)))
+                if la_cha:
+                    ctx_dich = items[0][0]
+            elif ctx_dich:
+                vts = _vi_tri_trong(part, None if la_cha else dieu_cha)
+                if not vts and la_cha and bo_dau(m.group(1)).startswith(("thay", "cum tu")):
+                    continue
+                for vt in vts or [None]:
+                    out.append(QuanHe(loai, ctx_dich, vt, f"Điều {dieu_so}", _cat(line)))
+        if la_cha and not co_dich_rieng:
+            ds = RE_DIEU.findall(cau)
+            dieu_cha = ds[-1] if ds else None
     return out
 
 
 RE_THAY_THE = re.compile(r"(?:này|này)\s+thay thế|thay thế\s+(?:các\s+)?" + _LOAI, re.I)
-RE_BAI_BO = re.compile(r"bãi bỏ\s+(?:toàn bộ\s+)?(?:các\s+)?(?:" + _LOAI + r"|Điều|điều|khoản|điểm|văn bản)", re.I)
+RE_BAI_BO = re.compile(
+    r"bãi bỏ\s+(?:toàn bộ\s+)?(?:các\s+)?(?:" + _LOAI + r"|Điều|điều|khoản|điểm|văn bản|quy định)", re.I
+)
 RE_HET_HL = re.compile(r"hết hiệu lực", re.I)
-RE_BO_QUA_HL = re.compile(r"tiếp tục|cụm từ|mẫu số|Kể từ thời điểm", re.I)
+RE_BO_QUA_HL = re.compile(r"tiếp tục|Kể từ thời điểm", re.I)
+RE_MOC_THOI_GIAN = re.compile(
+    r"(?:từ|đến|kể từ|cho đến)\s+(?:ngày|khi|thời điểm)\s+" + _LOAI + r"\s+số\s+\S+\s+(?:\S+\s+){0,12}?hết hiệu lực", re.I
+)
+RE_THAY_MAU = re.compile(
+    r"[Mm]ẫu(?:\s+số)?\s+([0-9A-Za-zĐđ/\-]+)[^;]*?kèm theo\s+" + _LOAI + r"\s+số\s+(\S+?)(?=[\s,;.]|$)"
+)
 
 
 def doc_hieu_luc(dieu_so: str, dieu_text: str) -> list[QuanHe]:
     """Đọc điều khoản hiệu lực: văn bản nào bị thay thế, bãi bỏ, hết hiệu lực.
-    Chỉ nhận khi động từ gắn trực tiếp với văn bản ('Luật này thay thế Luật ... số', 'Bãi bỏ Nghị định số',
-    'Nghị định số ... hết hiệu lực', hoặc danh sách 'các văn bản sau đây hết hiệu lực:').
-    Bỏ qua quy định chuyển tiếp, thay cụm từ, thay mẫu biểu và chữ trong ngoặc kép."""
+    Chỉ nhận khi động từ gắn trực tiếp với văn bản ('Luật này thay thế Luật ... số', 'Bãi bỏ quy định tại
+    Điều 6 Nghị định số', 'Nghị định số ... hết hiệu lực', hoặc danh sách 'Bãi bỏ quy định tại:' kèm các mục).
+    Bỏ qua quy định chuyển tiếp, mốc thời gian ('có hiệu lực từ ngày Nghị quyết số X hết hiệu lực'),
+    chữ trong ngoặc kép. Lệnh thay cụm từ do doc_sua_doi đọc; thay mẫu biểu ghi là sửa đổi mẫu."""
     out: list[QuanHe] = []
-    dong_tu_ds: str | None = None  # động từ của danh sách đang mở ("các văn bản sau đây hết hiệu lực:")
+    dong_tu_ds: str | None = None
     lines = dieu_text.split("\n")
     for i, line in _ngoai_ngoac_kep(lines):
         if i == 0:
             continue
         if re.match(r"^\s*\d+[a-zđ]?\.", line):
             dong_tu_ds = None
-        if RE_BO_QUA_HL.search(line) or RE_LENH_SUA.match(line) and re.search(r"cụm từ", line, re.I):
-            if line.rstrip().endswith(":"):
-                dong_tu_ds = None
+        if RE_BO_QUA_HL.search(line) or RE_MOC_THOI_GIAN.search(line):
             continue
+        if RE_LENH_SUA.match(line) and re.search(r"cụm từ", line, re.I) or RE_LENH_CON.match(line):
+            continue
+        if re.search(r"thay thế\s+(?:các\s+)?mẫu", line, re.I):
+            for mm in RE_THAY_MAU.finditer(line):
+                if tach_so(mm.group(2)):
+                    out.append(QuanHe("sua_doi", tach_so(mm.group(2))[0], f"mẫu số {mm.group(1)}", f"Điều {dieu_so}", _cat(line)))
+            continue
+        if line.rstrip().endswith(":"):
+            dl = bo_dau(line)
+            hd = "thay_the" if "thay the" in dl else "bai_bo" if "bai bo" in dl else "het_hieu_luc" if "het hieu luc" in dl else None
+            if hd:
+                dong_tu_ds = hd
+                if not tach_so(line):
+                    continue
         dt = None
         if RE_THAY_THE.search(line):
             dt = "thay_the"
@@ -214,30 +286,18 @@ def doc_hieu_luc(dieu_so: str, dieu_text: str) -> list[QuanHe]:
             dt = "bai_bo"
         elif RE_HET_HL.search(line):
             dt = "het_hieu_luc"
-        if line.rstrip().endswith(":") and dt:
-            dong_tu_ds = dt
-            if not tach_so(line):
-                continue
         la_muc = bool(re.match(r"^\s*[a-zđ]\)|^\s*[-–+]", line))
-        loai = dt or (dong_tu_ds if la_muc else None)
+        loai = (dong_tu_ds if la_muc and dong_tu_ds else None) or dt
         if not loai:
             continue
-        for muc in re.split(r";", line):
-            so_ds = tach_so(muc)
-            if not so_ds:
-                continue
-            so = so_ds[0]  # số đầu tiên là văn bản bị tác động; các số sau thuộc phần mô tả
-            truoc = muc[: muc.find(so)]
-            if dt == "het_hieu_luc" and not la_muc:
-                # 'X số ... hết hiệu lực': số phải đứng trước cụm 'hết hiệu lực' trong cùng mệnh đề
-                pos = RE_HET_HL.search(muc)
-                if not pos or muc.find(so) > pos.start():
+        for muc in line.split(";"):
+            pos = RE_HET_HL.search(muc)
+            for so, seg in tach_muc_van_ban(muc):
+                if loai == "het_hieu_luc" and not la_muc and (not pos or muc.find(so) > pos.start()):
                     continue
-            vt = None
-            m = list(RE_VI_TRI.finditer(truoc[-80:]))
-            if m and re.search(_LOAI + r"\s+(?:số\s+)?$", truoc.strip() + " "):
-                vt = m[-1].group(1)
-            out.append(QuanHe(loai, so, vt, f"Điều {dieu_so}", _cat(muc)))
+                seg = re.split(r"(?:này|này)\s+(?:thay thế|bãi bỏ)|[Bb]ãi bỏ|thay thế", seg)[-1]
+                for vt in _vi_tri_trong(seg) or [None]:
+                    out.append(QuanHe(loai, so, vt, f"Điều {dieu_so}", _cat(muc)))
     return out
 
 
@@ -271,9 +331,10 @@ def doc_van_ban(conn: sqlite3.Connection, doc: sqlite3.Row) -> list[QuanHe]:
                             out.append(QuanHe("can_cu", ds[0], None, None, _cat(line)))
         elif u["loai"] == "dieu" and u["duong_dan"].count("Điều") == 1 and not doc["la_hop_nhat"]:
             tieu_de = u["tieu_de"] or ""
-            if RE_DIEU_HIEU_LUC.search(tieu_de):
+            hl = bool(RE_DIEU_HIEU_LUC.search(tieu_de))
+            if hl:
                 out += doc_hieu_luc(u["so"], noi_dung)
-            if la_sua_doi or re.search(r"sửa đổi|bổ sung|bãi bỏ", tieu_de, re.I):
+            if hl or la_sua_doi or re.search(r"sửa đổi|bổ sung|bãi bỏ|thay thế", tieu_de, re.I):
                 out += doc_sua_doi(u["so"], noi_dung, so_dich_mac_dinh)
 
     co_vi_tri = {q.dst_so for q in out if q.loai in ("sua_doi", "bai_bo") and q.dst_vi_tri}
