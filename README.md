@@ -92,7 +92,15 @@ Số ký hiệu, cơ quan, trích yếu, ngày ban hành được tự đọc t�
 
 Nhập nhiều văn bản một lúc: lập bảng CSV có cột `tep` (tên tệp) và các cột `so_ky_hieu, co_quan_ban_hanh, trich_yeu, tinh_trang_nguon, ...`, rồi chạy `phapluat nhap-danh-muc danh-muc.csv`.
 
-Ghi quan hệ sửa đổi, thay thế (để có cảnh báo khi trích dẫn). Cú pháp: `phapluat quan-he <văn bản tác động> <loại> <văn bản bị tác động> --vi-tri-dich "<vị trí>"`, ví dụ với hai văn bản mẫu kiểm thử:
+Đọc quan hệ tự động từ nội dung văn bản (vbpl.vn không cho đọc lược đồ quan hệ vì phần đó nằm ở `/api/`):
+
+```powershell
+.venv\Scripts\phapluat doc-quan-he --chi-tiet
+```
+
+Lệnh đọc dòng "Căn cứ" ở phần mở đầu, các lệnh "Sửa đổi, bổ sung / Bãi bỏ / Thay cụm từ" trong văn bản sửa đổi (bỏ qua chữ trong ngoặc kép), và điều khoản hiệu lực ("thay thế", "bãi bỏ", "hết hiệu lực"; bỏ qua câu có "tiếp tục"). Chỉ ghi khi văn bản nêu rõ số ký hiệu. Mỗi quan hệ tự đọc được gắn nhãn "tự đọc từ nội dung, cần đối chiếu" và hiện nhãn đó khi tra cứu. Chạy lại không làm nhân đôi và không đụng tới quan hệ ghi tay. Lệnh `thu-thap-vbpl` cũng tự chạy bước này cho văn bản vừa nhập.
+
+Ghi tay quan hệ sửa đổi, thay thế (để có cảnh báo khi trích dẫn). Cú pháp: `phapluat quan-he <văn bản tác động> <loại> <văn bản bị tác động> --vi-tri-dich "<vị trí>"`, ví dụ với hai văn bản mẫu kiểm thử:
 
 ```powershell
 .venv\Scripts\phapluat quan-he 1000/2099/NĐ-CP sua_doi 999/2099/NĐ-CP --vi-tri-dich "khoản 2 Điều 3"

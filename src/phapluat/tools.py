@@ -32,11 +32,21 @@ QUAN_HE_TEN = {
     "dinh_chinh": "đính chính",
     "hop_nhat": "hợp nhất",
     "tiep_tuc_ap_dung": "tiếp tục áp dụng sau sắp xếp",
+    "het_hieu_luc": "làm hết hiệu lực",
 }
 
 
 # ---------------------------------------------------------------------------
 # Tiện ích
+
+
+def _nhan_tu_doc(r) -> str:
+    """Ghi chú cho quan hệ đọc tự động từ nội dung văn bản."""
+    try:
+        gc = r["ghi_chu"] or ""
+    except (IndexError, KeyError):
+        return ""
+    return " [tự đọc từ nội dung, cần đối chiếu]" if "tự đọc" in gc else ""
 
 
 def _tinh_trang(doc: sqlite3.Row, hom_nay: date | None = None) -> tuple[str, str | None]:
@@ -317,13 +327,18 @@ def _anh_huong(conn, doc_id: int, dieu: str, khoan: str | None) -> list[str]:
     rows = conn.execute(
         "SELECT r.*, d.so_ky_hieu AS src_so, d.co_quan_ban_hanh AS src_cq FROM relations r "
         "JOIN documents d ON d.id = r.src_doc_id WHERE r.dst_doc_id = ? "
-        "AND r.loai_quan_he IN ('sua_doi','thay_the','bai_bo','dinh_chinh')",
+        "AND r.loai_quan_he IN ('sua_doi','thay_the','bai_bo','dinh_chinh','het_hieu_luc')",
         (doc_id,),
     ).fetchall()
     out = []
     for r in rows:
         vt = bo_dau(r["dst_vi_tri"] or "")
         if not vt:
+            if r["loai_quan_he"] in ("thay_the", "bai_bo", "het_hieu_luc"):
+                out.append(
+                    f"- Toàn bộ văn bản bị {QUAN_HE_TEN.get(r['loai_quan_he'], r['loai_quan_he'])} bởi "
+                    f"{r['src_vi_tri'] + ' ' if r['src_vi_tri'] else ''}{r['src_so']} ({r['src_cq']})" + _nhan_tu_doc(r)
+                )
             continue
         if not re.search(rf"\bdieu {re.escape(bo_dau(dieu))}\b", vt):
             continue
@@ -331,7 +346,7 @@ def _anh_huong(conn, doc_id: int, dieu: str, khoan: str | None) -> list[str]:
             continue
         out.append(
             f"- {r['dst_vi_tri']} bị {QUAN_HE_TEN.get(r['loai_quan_he'], r['loai_quan_he'])} bởi "
-            f"{r['src_vi_tri'] + ' ' if r['src_vi_tri'] else ''}{r['src_so']} ({r['src_cq']})"
+            f"{r['src_vi_tri'] + ' ' if r['src_vi_tri'] else ''}{r['src_so']} ({r['src_cq']})" + _nhan_tu_doc(r)
         )
     return out
 
@@ -396,9 +411,9 @@ def kiem_tra_hieu_luc(conn, danh_sach: list[str]) -> str:
         for doc in rows:
             block = _the_van_ban(doc)
             thay = conn.execute(
-                "SELECT d.so_ky_hieu, d.co_quan_ban_hanh, r.loai_quan_he, r.dst_vi_tri FROM relations r "
+                "SELECT d.so_ky_hieu, d.co_quan_ban_hanh, r.loai_quan_he, r.dst_vi_tri, r.ghi_chu FROM relations r "
                 "JOIN documents d ON d.id = r.src_doc_id WHERE r.dst_doc_id = ? "
-                "AND r.loai_quan_he IN ('thay_the','bai_bo','sua_doi')",
+                "AND r.loai_quan_he IN ('thay_the','bai_bo','sua_doi','het_hieu_luc')",
                 (doc["id"],),
             ).fetchall()
             if thay:
@@ -406,6 +421,7 @@ def kiem_tra_hieu_luc(conn, danh_sach: list[str]) -> str:
                     f"- {QUAN_HE_TEN[t['loai_quan_he']]}"
                     + (f" ({t['dst_vi_tri']})" if t["dst_vi_tri"] else "")
                     + f": {t['so_ky_hieu']} ({t['co_quan_ban_hanh']})"
+                    + _nhan_tu_doc(t)
                     for t in thay
                 )
             out.append(block)
@@ -434,6 +450,7 @@ def van_ban_lien_quan(conn, van_ban: str, co_quan: str | None = None) -> str:
                 f"- {QUAN_HE_TEN.get(r['loai_quan_he'], r['loai_quan_he'])} {r['dst_so_ky_hieu']}"
                 + (f" ({r['dst_vi_tri']})" if r["dst_vi_tri"] else "")
                 + ("" if r["dst_doc_id"] else " [chưa có trong kho]")
+                + _nhan_tu_doc(r)
             )
     if den:
         lines.append("Văn bản tác động đến văn bản này:")
@@ -441,6 +458,7 @@ def van_ban_lien_quan(conn, van_ban: str, co_quan: str | None = None) -> str:
             lines.append(
                 f"- {r['src_so']} ({r['src_cq']}) {QUAN_HE_TEN.get(r['loai_quan_he'], r['loai_quan_he'])}"
                 + (f" {r['dst_vi_tri']}" if r["dst_vi_tri"] else "")
+                + _nhan_tu_doc(r)
             )
     if not di and not den:
         lines.append("Chưa ghi nhận văn bản liên quan trong kho.")

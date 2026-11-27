@@ -63,6 +63,7 @@ def nhap_tep(conn, path: str, meta: dict) -> tuple[int, list[str]]:
 
 
 def _thu_thap_vbpl(conn, a) -> int:
+    from .quanhe import ghi_quan_he
     from .thuthap_vbpl import BoTai, ChiMucSitemap, LoiThuThap, thu_thap_url
 
     nguon = list(a.nguon)
@@ -91,10 +92,11 @@ def _thu_thap_vbpl(conn, a) -> int:
                     raise LoiThuThap(
                         f"có {len(urls)} trang cùng số ký hiệu {n}, hãy chọn một url:\n    " + "\n    ".join(urls)
                     )
-            _, kq = thu_thap_url(conn, urls[0], bo_tai, luu, so_mong_doi=None if n.startswith("http") else n)
+            doc_id, kq = thu_thap_url(conn, urls[0], bo_tai, luu, so_mong_doi=None if n.startswith("http") else n)
+            qh = ghi_quan_he(conn, [doc_id]).get(doc_id, [])
             print(
                 f"OK   {kq.meta['so_ky_hieu']} ({kq.meta.get('co_quan_ban_hanh', '')}): {kq.so_dieu} điều, "
-                f"{kq.meta.get('tinh_trang_nguon', 'chưa rõ tình trạng')}. {kq.meta['url_goc']}"
+                f"{kq.meta.get('tinh_trang_nguon', 'chưa rõ tình trạng')}, {len(qh)} quan hệ tự đọc. {kq.meta['url_goc']}"
             )
             for c in kq.canh_bao:
                 print(f"     Cảnh báo: {c}")
@@ -122,13 +124,20 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("quan-he", help="ghi quan hệ: văn bản nguồn <loai> văn bản đích")
     p.add_argument("so_nguon")
     p.add_argument("loai", choices=["can_cu", "huong_dan", "sua_doi", "thay_the", "bai_bo", "dinh_chinh",
-                                    "hop_nhat", "tiep_tuc_ap_dung"])
+                                    "hop_nhat", "tiep_tuc_ap_dung", "het_hieu_luc"])
     p.add_argument("so_dich")
     p.add_argument("--co-quan-nguon")
     p.add_argument("--co-quan-dich")
     p.add_argument("--vi-tri-nguon")
     p.add_argument("--vi-tri-dich")
     p.add_argument("--ghi-chu")
+
+    p = sub.add_parser(
+        "doc-quan-he",
+        help="đọc quan hệ căn cứ, sửa đổi, thay thế, bãi bỏ, hết hiệu lực, hợp nhất từ nội dung văn bản trong kho",
+    )
+    p.add_argument("so", nargs="*", help="số ký hiệu cần đọc (bỏ trống: mọi văn bản trong kho)")
+    p.add_argument("--chi-tiet", action="store_true", help="in từng quan hệ kèm câu làm căn cứ")
 
     sub.add_parser("thong-ke", help="thống kê kho và danh sách văn bản cần kiểm tra")
     p = sub.add_parser("khao-sat-vbpl", help="tải vài trang vbpl.vn để phân tích cấu trúc (chạy trên máy cá nhân)")
@@ -198,6 +207,33 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         add_relation(conn, src[0]["id"], a.loai, a.so_dich, a.co_quan_dich, a.vi_tri_nguon, a.vi_tri_dich, a.ghi_chu)
         print("Đã ghi quan hệ.")
+    elif a.cmd == "doc-quan-he":
+        from .quanhe import ghi_quan_he
+
+        ids = None
+        if a.so:
+            ids = []
+            for so in a.so:
+                rows = find_documents(conn, so)
+                if len(rows) != 1:
+                    print(f"{so}: tìm thấy {len(rows)} văn bản, cần đúng 1; bỏ qua.")
+                    continue
+                ids.append(rows[0]["id"])
+        kq = ghi_quan_he(conn, ids)
+        ten = {r["id"]: r["so_ky_hieu"] for r in conn.execute("SELECT id, so_ky_hieu FROM documents")}
+        tong = 0
+        for doc_id, qs in kq.items():
+            tong += len(qs)
+            print(f"{ten[doc_id]}: {len(qs)} quan hệ")
+            if a.chi_tiet:
+                for q in qs:
+                    vt = f" ({q.dst_vi_tri})" if q.dst_vi_tri else ""
+                    print(f"    {q.loai} {q.dst_so}{vt} <- {q.src_vi_tri or 'trích yếu/mở đầu'}: {q.can_cu_cau}")
+        lien_ket = conn.execute(
+            "SELECT count(*) FROM relations WHERE ghi_chu LIKE '%tự đọc%' AND dst_doc_id IS NOT NULL"
+        ).fetchone()[0]
+        print(f"Xong: {tong} quan hệ tự đọc; {lien_ket} quan hệ trỏ tới văn bản đã có trong kho.")
+        print("Các quan hệ này đọc tự động từ nội dung, cần đối chiếu trước khi viện dẫn.")
     elif a.cmd == "thong-ke":
         from .status import CAN_KIEM_TRA, tinh_trang
 
