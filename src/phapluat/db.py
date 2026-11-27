@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_units_parent ON units (parent_id);
 CREATE TABLE IF NOT EXISTS relations (
     id              INTEGER PRIMARY KEY,
     src_doc_id      INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    loai_quan_he    TEXT NOT NULL,  -- can_cu, huong_dan, sua_doi, thay_the, bai_bo, dinh_chinh, hop_nhat, tiep_tuc_ap_dung
+    loai_quan_he    TEXT NOT NULL,  -- can_cu, huong_dan, sua_doi, thay_the, bai_bo, dinh_chinh, hop_nhat, tiep_tuc_ap_dung, het_hieu_luc
     dst_so_ky_hieu  TEXT NOT NULL,  -- văn bản bị tác động / được dẫn chiếu
     dst_co_quan     TEXT,
     dst_doc_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
