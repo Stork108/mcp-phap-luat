@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import sqlite3
 from datetime import datetime
 
@@ -137,18 +139,28 @@ def add_relation(
     conn.commit()
 
 
+_RE_SO_DIA_PHUONG = re.compile(r"(HĐND|UBND|HDND)", re.I)
+
+
 def _link_relations(conn: sqlite3.Connection, _doc_id: int | None) -> None:
     """Nối quan hệ với văn bản đích khi văn bản đích đã có trong kho (khớp duy nhất)."""
-    rows = conn.execute("SELECT id, dst_so_ky_hieu, dst_co_quan FROM relations WHERE dst_doc_id IS NULL").fetchall()
+    rows = conn.execute(
+        "SELECT r.id, r.dst_so_ky_hieu, r.dst_co_quan, d.tinh_hien_nay AS src_tinh FROM relations r "
+        "LEFT JOIN documents d ON d.id = r.src_doc_id WHERE r.dst_doc_id IS NULL"
+    ).fetchall()
     for r in rows:
         so = chuan_hoa_so_ky_hieu(r["dst_so_ky_hieu"])
         if r["dst_co_quan"]:
             cands = conn.execute(
-                "SELECT id FROM documents WHERE so_ky_hieu_norm = ? AND co_quan_norm = ?",
+                "SELECT id, tinh_hien_nay FROM documents WHERE so_ky_hieu_norm = ? AND co_quan_norm = ?",
                 (so, chuan_hoa_ten_co_quan(r["dst_co_quan"])),
             ).fetchall()
         else:
-            cands = conn.execute("SELECT id FROM documents WHERE so_ky_hieu_norm = ?", (so,)).fetchall()
+            cands = conn.execute("SELECT id, tinh_hien_nay FROM documents WHERE so_ky_hieu_norm = ?", (so,)).fetchall()
+        if len(cands) > 1 and r["src_tinh"] and _RE_SO_DIA_PHUONG.search(r["dst_so_ky_hieu"] or ""):
+            # Số ký hiệu địa phương trùng giữa các tỉnh (ví dụ 28/2025/NQ-HĐND): văn bản địa phương
+            # nhắc số không kèm tên tỉnh thì chỉ nối khi đúng một văn bản cùng tỉnh hiện nay.
+            cands = [c for c in cands if c["tinh_hien_nay"] == r["src_tinh"]]
         if len(cands) == 1:
             conn.execute("UPDATE relations SET dst_doc_id = ? WHERE id = ?", (cands[0]["id"], r["id"]))
 

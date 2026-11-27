@@ -148,3 +148,25 @@ def test_pham_vi_trung_uong_va_dia_phuong(conn):
     assert "QĐ-UBND" in tools.tra_cuu_tuan_thu(conn, "áp dụng trên địa bàn tỉnh", tinh="Đồng Nai")
     with pytest.raises(ValueError):
         tools.tim_van_ban(conn, "quy dinh mau", pham_vi="sai")
+
+
+def test_noi_quan_he_so_dia_phuong_trung_theo_tinh(tmp_path):
+    c = connect(tmp_path / "q.db")
+    ids = {}
+    for tinh in ("Đồng Nai", "Hồ Chí Minh"):
+        ids[tinh] = upsert_document(
+            c,
+            {"so_ky_hieu": "28/2025/NQ-HĐND", "co_quan_ban_hanh": f"HĐND {tinh}", "tinh_hien_nay": tinh},
+            parse_text("Điều 1. Bảng giá đất."),
+        )
+    src = upsert_document(
+        c,
+        {"so_ky_hieu": "30/2026/NQ-HĐND", "co_quan_ban_hanh": "HĐND Thành phố Đồng Nai", "tinh_hien_nay": "Đồng Nai"},
+        parse_text("Điều 1. Sửa đổi."),
+    )
+    add_relation(c, src, "sua_doi", "28/2025/NQ-HĐND")
+    assert c.execute("SELECT dst_doc_id FROM relations").fetchone()[0] == ids["Đồng Nai"]
+    # Văn bản trung ương nhắc số trùng: không tự chọn.
+    tw = upsert_document(c, {"so_ky_hieu": "1/2099/NĐ-CP", "co_quan_ban_hanh": "Chính phủ"}, parse_text("Điều 1. X."))
+    add_relation(c, tw, "can_cu", "28/2025/NQ-HĐND")
+    assert c.execute("SELECT dst_doc_id FROM relations WHERE src_doc_id = ?", (tw,)).fetchone()[0] is None
