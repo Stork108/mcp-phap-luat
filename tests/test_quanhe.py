@@ -136,3 +136,24 @@ def test_lenh_doc_quan_he(tmp_path, capsys):
     assert main(["--db", str(db), "doc-quan-he", "--chi-tiet"]) == 0
     out = capsys.readouterr().out
     assert "het_hieu_luc 997/2099/NĐ-CP" in out and "cần đối chiếu" in out
+
+
+def test_khong_nham_quy_dinh_chuyen_tiep_cum_tu_mau_bieu():
+    dieu = """Điều 24. Quy định chuyển tiếp và hiệu lực thi hành
+1. Thông tư này có hiệu lực từ ngày 01 tháng 7 năm 2099.
+2. Kể từ thời điểm tổ chức sử dụng hóa đơn theo quy định tại Nghị định số 990/2099/NĐ-CP, nếu phát hiện hóa đơn sai thì lập hóa đơn thay thế.
+3. Thay thế cụm từ "doanh nghiệp nhà nước" bằng cụm từ "doanh nghiệp mẫu" tại khoản 1 Điều 35 của Luật Mẫu số 83/2098/QH99.
+- Cụm từ "Điều 60 Nghị định này" bằng cụm từ "Phụ lục I Nghị định số 989/2099/NĐ-CP" tại điểm b khoản 2 Điều 94.
+4. Thông tư này thay thế mẫu số 01/TKN-CNKD kèm theo Thông tư số 50/2099/TT-BTC.
+5. Bãi bỏ Thông tư số 49/2099/TT-BTC."""
+    vt = {(q.loai, q.dst_so, q.dst_vi_tri) for q in doc_hieu_luc("24", dieu)}
+    assert vt == {("bai_bo", "49/2099/TT-BTC", None)}
+
+
+def test_so_ky_hieu_co_dau_cach_va_mau_bieu():
+    from phapluat.quanhe import chuan_hoa_chu
+
+    assert tach_so(chuan_hoa_chu("Luật Dược số 105/ 2016/QH13")) == ["105/2016/QH13"]
+    assert tach_so("Bổ sung Mẫu số 01/BK-ĐCTT, Mẫu số 01/TH-DT vào Phụ lục IA") == []
+    assert tach_so("văn bản số 716/UBTVQH13-CVĐXH") == []
+    assert tach_so("hợp nhất số 18/VBHN-VPQH") == ["18/VBHN-VPQH"]
