@@ -130,6 +130,33 @@ def _thu_thap_vbpl(conn, a) -> int:
     return 0 if loi == 0 else 1
 
 
+def _xoa(conn, a) -> int:
+    from .store import delete_document, find_documents
+
+    loi = 0
+    for so in a.so:
+        rows = find_documents(conn, so, a.co_quan)
+        if not rows:
+            print(f"KHÔNG THẤY {so}" + (f" (cơ quan: {a.co_quan})" if a.co_quan else ""))
+            loi += 1
+            continue
+        if len(rows) > 1:
+            print(f"TRÙNG {so}: {len(rows)} văn bản, cần --co-quan để chọn:")
+            for r in rows:
+                print(f"    {r['so_ky_hieu']} | {r['co_quan_ban_hanh']}")
+            loi += 1
+            continue
+        r = rows[0]
+        if a.xac_nhan:
+            delete_document(conn, r["id"], a.ly_do)
+            print(f"ĐÃ XÓA {r['so_ky_hieu']} | {r['co_quan_ban_hanh']}")
+        else:
+            print(f"SẼ XÓA {r['so_ky_hieu']} | {r['co_quan_ban_hanh']} | {r['trich_yeu']}")
+    if not a.xac_nhan:
+        print("Chưa xóa gì. Thêm --xac-nhan để xóa.")
+    return 0 if loi == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="phapluat", description="Kho tra cứu văn bản pháp luật cá nhân")
     ap.add_argument("--db", help=f"đường dẫn tệp kho dữ liệu (mặc định {default_db_path()})")
@@ -162,6 +189,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--chi-tiet", action="store_true", help="in từng quan hệ kèm câu làm căn cứ")
 
     sub.add_parser("thong-ke", help="thống kê kho và danh sách văn bản cần kiểm tra")
+    p = sub.add_parser("xoa", help="xóa văn bản khỏi kho theo số ký hiệu (mặc định chỉ liệt kê, thêm --xac-nhan để xóa)")
+    p.add_argument("so", nargs="+", help="số ký hiệu cần xóa")
+    p.add_argument("--co-quan", help="chỉ xóa văn bản có cơ quan ban hành chứa chuỗi này (bắt buộc khi số trùng)")
+    p.add_argument("--ly-do", default="", help="ghi vào nhật ký thay đổi")
+    p.add_argument("--xac-nhan", action="store_true", help="thực sự xóa")
     p = sub.add_parser("khao-sat-vbpl", help="tải vài trang vbpl.vn để phân tích cấu trúc (chạy trên máy cá nhân)")
     p.add_argument("--so-trang", type=int, default=15)
     p.add_argument("--buoc", type=int, default=1, choices=[1, 2], help="2: đọc sơ đồ trang và vài trang chi tiết")
@@ -207,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     conn = connect()
     if a.cmd == "thu-thap-vbpl":
         return _thu_thap_vbpl(conn, a)
+    if a.cmd == "xoa":
+        return _xoa(conn, a)
     if a.cmd == "nhap":
         meta = {f: getattr(a, f) for f in FIELD_ARGS if getattr(a, f)}
         meta.setdefault("nguon", "thu-cong")

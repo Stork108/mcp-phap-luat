@@ -120,6 +120,20 @@ def upsert_document(conn: sqlite3.Connection, meta: dict, parsed: ParsedDocument
     return doc_id
 
 
+def delete_document(conn: sqlite3.Connection, doc_id: int, ly_do: str = "") -> None:
+    """Xóa hẳn một văn bản (nội dung, chỉ mục tìm kiếm, quan hệ nguồn); quan hệ trỏ tới nó thành chưa nối."""
+    d = conn.execute("SELECT so_ky_hieu, co_quan_ban_hanh FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    if d is None:
+        return
+    conn.execute("DELETE FROM units_fts WHERE doc_id = ?", (doc_id,))
+    conn.execute("DELETE FROM units WHERE doc_id = ?", (doc_id,))
+    conn.execute("DELETE FROM relations WHERE src_doc_id = ?", (doc_id,))
+    conn.execute("UPDATE relations SET dst_doc_id = NULL WHERE dst_doc_id = ?", (doc_id,))
+    conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    log(conn, None, "xoa", f"{d['so_ky_hieu']} ({d['co_quan_ban_hanh']}) {ly_do}".strip())
+    conn.commit()
+
+
 def add_relation(
     conn: sqlite3.Connection,
     src_doc_id: int,

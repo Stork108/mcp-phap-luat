@@ -170,3 +170,14 @@ def test_noi_quan_he_so_dia_phuong_trung_theo_tinh(tmp_path):
     tw = upsert_document(c, {"so_ky_hieu": "1/2099/NĐ-CP", "co_quan_ban_hanh": "Chính phủ"}, parse_text("Điều 1. X."))
     add_relation(c, tw, "can_cu", "28/2025/NQ-HĐND")
     assert c.execute("SELECT dst_doc_id FROM relations WHERE src_doc_id = ?", (tw,)).fetchone()[0] is None
+
+
+def test_xoa_van_ban(conn):
+    from phapluat.store import delete_document, find_documents
+
+    rows = find_documents(conn, "01/2099/QĐ-UBND", "Đồng Nai")
+    assert len(rows) == 1
+    delete_document(conn, rows[0]["id"], "bảng giá đất cũ")
+    assert len(find_documents(conn, "01/2099/QĐ-UBND")) == 1
+    assert "Đồng Nai" not in tools.tim_van_ban(conn, "quy dinh mau", pham_vi="tat_ca", bao_gom_het_hieu_luc=True)
+    assert conn.execute("SELECT count(*) FROM changelog WHERE su_kien = 'xoa'").fetchone()[0] == 1
