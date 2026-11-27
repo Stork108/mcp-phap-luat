@@ -114,7 +114,8 @@ def test_van_ban_dia_phuong():
     assert m["so_ky_hieu"] == "70/2023/NQ-HĐND"
     assert m["co_quan_ban_hanh"] == "HĐND tỉnh Bắc Giang"
     assert m["tinh_ban_hanh_goc"] == "Bắc Giang"
-    assert "tinh_hien_nay" not in m  # không tự đoán tỉnh sau sắp xếp
+    # Tỉnh hiện nay lấy đúng trường organization của vbpl.vn (Bắc Giang nay thuộc Bắc Ninh), không tự suy.
+    assert m["tinh_hien_nay"] == "Bắc Ninh"
     assert m["ngay_het_hieu_luc"] == "2026-12-01"
     assert m["trich_yeu"].endswith("đối với nước thải trên địa bàn tỉnh Bắc Giang")
     assert any("Văn bản địa phương" in c for c in kq.canh_bao)
@@ -256,4 +257,36 @@ def test_thu_thap_url_ghi_vao_kho(tmp_path):
         tt.thu_thap_url(conn, URL_BLLD, tt.BoTai(mo_url=web), so_mong_doi="10/2012/QH13")
     # Thu thập lại cùng văn bản thì cập nhật, không tạo bản trùng.
     tt.thu_thap_url(conn, URL_BLLD, tt.BoTai(mo_url=web))
+    assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 1
+
+
+def test_tinh_hien_nay_chi_lay_tu_organization():
+    doc = _doc_mau(
+        docNum="493/QĐ-UBND",
+        docType={"name": "Quyết định"},
+        title="Quyết định số 493/QĐ-UBND mẫu",
+        agencyName="UBND Thành phố Đồng Nai",
+        effStatus={"code": "CHL", "name": "Còn hiệu lực"},
+        documentRelatedList=[],
+        organization={"name": "Đồng Nai", "code": "H75", "orgType": "1"},
+    )
+    noi_dung = "<p>QUYẾT ĐỊNH số 493/QĐ-UBND</p>" + "<p>Điều 1. Nội dung mẫu đủ dài để nhập.</p>" * 10
+    m = tt.doc_trang(_trang_tu_doc(doc, noi_dung), "https://vbpl.vn/van-ban/chi-tiet/x--1").meta
+    assert m["tinh_ban_hanh_goc"] == "Đồng Nai" and m["tinh_hien_nay"] == "Đồng Nai"
+    doc["organization"] = {"name": "Hồ Chí Minh", "code": "H79", "orgType": "0"}
+    m = tt.doc_trang(_trang_tu_doc(doc, noi_dung), "https://vbpl.vn/van-ban/chi-tiet/x--1").meta
+    assert "tinh_hien_nay" not in m  # orgType 0 là cơ quan trung ương: không gán tỉnh
+
+
+def test_bo_qua_van_ban_het_hieu_luc(tmp_path):
+    url = "https://vbpl.vn/van-ban/chi-tiet/x--2"
+    doc = _doc_mau(effStatus={"code": "HHL", "name": "Hết hiệu lực toàn bộ"}, effTo="2099-06-01T00:00:00")
+    noi_dung = "<p>NGHỊ ĐỊNH số 99/2099/NĐ-CP</p>" + "<p>Điều 1. Nội dung mẫu đủ dài để nhập.</p>" * 10
+    web = _FakeWeb({"https://vbpl.vn/robots.txt": ROBOTS, url: _trang_tu_doc(doc, noi_dung).encode("utf-8")})
+    conn = connect(tmp_path / "t.db")
+    with pytest.raises(tt.BoQuaHetHieuLuc, match="hết hiệu lực toàn bộ từ 2099-06-01"):
+        tt.thu_thap_url(conn, url, tt.BoTai(mo_url=web), bo_qua_het_hieu_luc=True)
+    assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
+    # Không bật bỏ qua thì vẫn nhập như trước (để giữ bản liền trước khi cần).
+    tt.thu_thap_url(conn, url, tt.BoTai(mo_url=web))
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 1

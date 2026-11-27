@@ -368,15 +368,23 @@ def chuyen_doi(doc: dict, content_html: str, url: str, hom_nay: date | None = No
         )
     if doc.get("docGroup") and doc.get("docGroup") != "VBQPPL":
         canh_bao.append(f"Nhóm văn bản trên vbpl.vn: {doc.get('docGroup')}.")
-    tinh = re.search(r"\b(?:tỉnh|thành phố|TP\.)\s+(.+)$", co_quan)
+    tinh = re.search(r"\b(?:tỉnh|thành phố|TP\.)\s+(.+)$", co_quan, re.I)
+    org = doc.get("organization") or {}
     if re.search(r"HĐND|UBND|Hội đồng nhân dân|Ủy ban nhân dân|Uỷ ban nhân dân", co_quan) or (
-        (doc.get("organization") or {}).get("orgType") not in (None, "0")
+        org.get("orgType") not in (None, "0")
     ):
         if tinh:
             meta["tinh_ban_hanh_goc"] = tinh.group(1).strip()
+        # vbpl.vn xếp văn bản địa phương vào đơn vị hành chính hiện nay (sau sắp xếp 2025),
+        # còn agencyName giữ cơ quan ban hành ban đầu. Chỉ lấy đúng tên vbpl.vn ghi, không tự suy.
+        if org.get("orgType") not in (None, "0") and (org.get("name") or "").strip():
+            meta["tinh_hien_nay"] = nfc(org["name"].strip())
+        thieu = [t for k, t in (("tinh_hien_nay", "tỉnh/thành phố hiện nay"), ("tinh_ban_hanh_goc", "tỉnh ban hành gốc"))
+                 if k not in meta]
         canh_bao.append(
-            "Văn bản địa phương: cần bổ sung tỉnh/thành phố hiện nay (sau sắp xếp) và phạm vi áp dụng"
-            + ("." if tinh else ", và tỉnh ban hành gốc.")
+            "Văn bản địa phương: cần xác định phạm vi áp dụng sau sắp xếp"
+            + (", và bổ sung " + ", ".join(thieu) if thieu else "")
+            + "."
         )
 
     if canh_bao:
@@ -497,10 +505,30 @@ def doc_trang(html: str, url: str, hom_nay: date | None = None) -> KetQua:
     return chuyen_doi(doc, content, url, hom_nay)
 
 
+class BoQuaHetHieuLuc(LoiThuThap):
+    """Trang ghi văn bản hết hiệu lực toàn bộ: không nhập (khi bật bỏ qua)."""
+
+    def __init__(self, url: str, kq: "KetQua"):
+        self.url = url
+        self.kq = kq
+        m = kq.meta
+        super().__init__(
+            f"{m.get('so_ky_hieu', '?')} ({m.get('co_quan_ban_hanh', '')}) hết hiệu lực toàn bộ"
+            + (f" từ {m['ngay_het_hieu_luc']}" if m.get("ngay_het_hieu_luc") else "")
+            + f" theo vbpl.vn: không nhập. {url}"
+        )
+
+
 def thu_thap_url(
-    conn, url: str, bo_tai: BoTai, luu_html: Path | None = None, so_mong_doi: str | None = None
+    conn,
+    url: str,
+    bo_tai: BoTai,
+    luu_html: Path | None = None,
+    so_mong_doi: str | None = None,
+    bo_qua_het_hieu_luc: bool = False,
 ) -> tuple[int, KetQua]:
-    """Tải, đọc và ghi một trang. Nếu có `so_mong_doi` mà số ký hiệu trên trang khác thì không ghi."""
+    """Tải, đọc và ghi một trang. Nếu có `so_mong_doi` mà số ký hiệu trên trang khác thì không ghi.
+    Nếu `bo_qua_het_hieu_luc` và vbpl.vn ghi hết hiệu lực toàn bộ thì không ghi (BoQuaHetHieuLuc)."""
     from .store import upsert_document
     from .textnorm import chuan_hoa_so_ky_hieu
 
@@ -514,6 +542,8 @@ def thu_thap_url(
         raise LoiThuThap(
             f"trang {url} là văn bản số {kq.meta.get('so_ky_hieu')}, không phải {so_mong_doi}: không nhập."
         )
+    if bo_qua_het_hieu_luc and kq.meta.get("tinh_trang_nguon") == HET_TOAN_BO:
+        raise BoQuaHetHieuLuc(url, kq)
     parsed = parse_text(kq.chu)
     kq.so_dieu = sum(1 for u in parsed.walk() if u.loai == "dieu")
     if kq.so_dieu == 0:
