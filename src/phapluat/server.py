@@ -45,14 +45,19 @@ def tim_van_ban(
     den_ngay: str | None = None,
     bao_gom_het_hieu_luc: bool = False,
     gioi_han: int = 10,
+    pham_vi: str = "mac_dinh",
 ) -> str:
     """Tìm văn bản theo từ khóa (có dấu hoặc không dấu) hoặc theo số ký hiệu.
 
     Mặc định bỏ qua văn bản đã hết hiệu lực toàn bộ. Ngày theo dạng YYYY-MM-DD.
     Kết quả kèm tình trạng hiệu lực và Điều khớp nhất.
+    Phạm vi: mặc định chỉ văn bản trung ương; nêu tinh (ví dụ 'Hồ Chí Minh', 'Đồng Nai', hoặc tỉnh cũ
+    'Bình Dương') thì thêm văn bản HĐND/UBND của tỉnh đó. pham_vi: 'mac_dinh', 'trung_uong',
+    'dia_phuong' (chỉ văn bản địa phương) hoặc 'tat_ca'. Tìm theo số ký hiệu luôn xét mọi phạm vi.
     """
     return tools.tim_van_ban(
-        _db(), tu_khoa, loai_van_ban, co_quan, tinh, linh_vuc, tu_ngay, den_ngay, bao_gom_het_hieu_luc, gioi_han
+        _db(), tu_khoa, loai_van_ban, co_quan, tinh, linh_vuc, tu_ngay, den_ngay, bao_gom_het_hieu_luc, gioi_han,
+        pham_vi,
     )
 
 
@@ -72,12 +77,19 @@ def lay_toan_van(van_ban: str, co_quan: str | None = None, trang: int = 1) -> st
 
 
 @mcp.tool()
-def tra_cuu_tuan_thu(tinh_huong: str, linh_vuc: str | None = None, gioi_han: int = 8) -> str:
+def tra_cuu_tuan_thu(
+    tinh_huong: str,
+    linh_vuc: str | None = None,
+    gioi_han: int = 8,
+    tinh: str | None = None,
+    pham_vi: str = "mac_dinh",
+) -> str:
     """Tìm các Điều liên quan nhất tới một tình huống, chỉ trong văn bản đang có hiệu lực.
 
     Trả về nguyên văn để phân tích; công cụ không tự kết luận có tuân thủ hay không.
+    Mặc định chỉ văn bản trung ương; nêu tinh để thêm văn bản địa phương của tỉnh đó (xem tim_van_ban).
     """
-    return tools.tra_cuu_tuan_thu(_db(), tinh_huong, linh_vuc, gioi_han)
+    return tools.tra_cuu_tuan_thu(_db(), tinh_huong, linh_vuc, gioi_han, tinh, pham_vi)
 
 
 @mcp.tool()

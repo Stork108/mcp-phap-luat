@@ -149,6 +149,78 @@ def _con_hieu_luc_hoac_khong_ro(doc, bao_gom_het: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Phạm vi trung ương / địa phương
+
+PHAM_VI = ("mac_dinh", "trung_uong", "dia_phuong", "tat_ca")
+_RE_CQ_DIA_PHUONG = re.compile(r"\b(hdnd|ubnd|hoi dong nhan dan|uy ban nhan dan)\b")
+
+
+def la_dia_phuong(doc) -> bool:
+    """Văn bản của chính quyền địa phương (HĐND, UBND hoặc có ghi tỉnh)."""
+    if doc["tinh_hien_nay"] or doc["tinh_ban_hanh_goc"]:
+        return True
+    return bool(_RE_CQ_DIA_PHUONG.search(bo_dau(doc["co_quan_ban_hanh"] or "")))
+
+
+def _khop_tinh(doc, tinh: str) -> bool:
+    return bo_dau(tinh) in bo_dau(
+        f"{doc['tinh_ban_hanh_goc'] or ''} {doc['tinh_hien_nay'] or ''} {doc['co_quan_ban_hanh'] or ''}"
+    )
+
+
+def _dat_pham_vi(conn, pham_vi: str, tinh: str | None) -> str:
+    """Ghi bảng tạm _pv gồm id văn bản được tìm, trả về điều kiện SQL cho units_fts (hoặc '').
+
+    mac_dinh: không nêu tỉnh thì chỉ văn bản trung ương; nêu tỉnh thì trung ương + văn bản của tỉnh đó.
+    trung_uong / dia_phuong: đúng một loại (dia_phuong kèm tỉnh thì chỉ tỉnh đó). tat_ca: không giới hạn.
+    """
+    if pham_vi not in PHAM_VI:
+        raise ValueError(f"pham_vi phải là một trong {', '.join(PHAM_VI)}")
+    if pham_vi == "tat_ca" and not tinh:
+        return ""
+    ids = []
+    for d in conn.execute("SELECT id, co_quan_ban_hanh, tinh_hien_nay, tinh_ban_hanh_goc FROM documents"):
+        dp = la_dia_phuong(d)
+        if pham_vi == "trung_uong":
+            ok = not dp
+        elif pham_vi == "dia_phuong":
+            ok = dp and (not tinh or _khop_tinh(d, tinh))
+        elif pham_vi == "tat_ca":
+            ok = not dp or _khop_tinh(d, tinh)
+        else:  # mac_dinh
+            ok = not dp or (bool(tinh) and _khop_tinh(d, tinh))
+        if ok:
+            ids.append((d["id"],))
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _pv (id INTEGER PRIMARY KEY)")
+    conn.execute("DELETE FROM _pv")
+    conn.executemany("INSERT INTO _pv VALUES (?)", ids)
+    return " AND f.doc_id IN (SELECT id FROM _pv)"
+
+
+def _ghi_chu_dia_phuong(conn, q: str, pham_vi: str, tinh: str | None) -> str:
+    """Nhắc khi tìm mặc định mà có văn bản địa phương khớp nhưng không hiển thị."""
+    if pham_vi != "mac_dinh" or tinh:
+        return ""
+    n = 0
+    seen: set[int] = set()
+    for h in conn.execute("SELECT DISTINCT f.doc_id FROM units_fts f WHERE units_fts MATCH ? LIMIT 2000", (q,)):
+        if h["doc_id"] in seen:
+            continue
+        seen.add(h["doc_id"])
+        d = conn.execute(
+            "SELECT co_quan_ban_hanh, tinh_hien_nay, tinh_ban_hanh_goc FROM documents WHERE id = ?", (h["doc_id"],)
+        ).fetchone()
+        if d and la_dia_phuong(d):
+            n += 1
+    if not n:
+        return ""
+    return (
+        f"\n\n(Ngoài ra có {n} văn bản địa phương khớp từ khóa, không hiển thị. "
+        "Nêu tinh=... hoặc pham_vi='dia_phuong' để xem.)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 1. Tìm văn bản
 
 
@@ -163,8 +235,9 @@ def tim_van_ban(
     den_ngay: str | None = None,
     bao_gom_het_hieu_luc: bool = False,
     gioi_han: int = 10,
+    pham_vi: str = "mac_dinh",
 ) -> str:
-    # Hỏi bằng số ký hiệu: chỉ trả về khớp đúng.
+    # Hỏi bằng số ký hiệu: chỉ trả về khớp đúng (mọi phạm vi).
     if re.search(r"\d+/\d{4}/|\d+/[A-ZĐ]", tu_khoa):
         rows = find_documents(conn, tu_khoa, co_quan)
         if not rows:
@@ -174,13 +247,17 @@ def tim_van_ban(
     q = _fts_query(tu_khoa)
     if not q:
         return "Từ khóa trống."
+    dk = _dat_pham_vi(conn, pham_vi, tinh)
     sql = (
         "SELECT f.unit_id, f.doc_id, bm25(units_fts) AS rank FROM units_fts f "
-        "WHERE units_fts MATCH ? ORDER BY rank LIMIT 400"
+        f"WHERE units_fts MATCH ?{dk} ORDER BY rank LIMIT 400"
     )
     hits = conn.execute(sql, (q,)).fetchall()
     # Thêm văn bản khớp theo tên/trích yếu.
     name_rows = find_documents(conn, tu_khoa) if "/" not in tu_khoa else []
+    if dk:
+        cho_phep = {r[0] for r in conn.execute("SELECT id FROM _pv")}
+        name_rows = [r for r in name_rows if r["id"] in cho_phep]
 
     best: dict[int, tuple[float, int | None]] = {}
     for r in sorted(name_rows, key=lambda r: (r["la_hop_nhat"] or 0, r["ngay_ban_hanh"] or ""), reverse=True):
@@ -201,9 +278,7 @@ def tim_van_ban(
             continue
         if co_quan and bo_dau(co_quan) not in (doc["co_quan_norm"] or ""):
             continue
-        if tinh and bo_dau(tinh) not in bo_dau(
-            f"{doc['tinh_ban_hanh_goc'] or ''} {doc['tinh_hien_nay'] or ''} {doc['co_quan_ban_hanh'] or ''}"
-        ):
+        if tinh and pham_vi == "dia_phuong" and not _khop_tinh(doc, tinh):
             continue
         if linh_vuc and bo_dau(linh_vuc) not in bo_dau(doc["linh_vuc"] or ""):
             continue
@@ -221,8 +296,8 @@ def tim_van_ban(
     if not out:
         return f"Không tìm thấy văn bản phù hợp với '{tu_khoa}'" + (
             "" if bao_gom_het_hieu_luc else " trong số văn bản chưa hết hiệu lực toàn bộ"
-        ) + "."
-    return f"Tìm thấy {len(out)} văn bản:\n\n" + "\n\n---\n\n".join(out)
+        ) + "." + _ghi_chu_dia_phuong(conn, q, pham_vi, tinh)
+    return f"Tìm thấy {len(out)} văn bản:\n\n" + "\n\n---\n\n".join(out) + _ghi_chu_dia_phuong(conn, q, pham_vi, tinh)
 
 
 # ---------------------------------------------------------------------------
@@ -283,13 +358,21 @@ def lay_toan_van(conn, van_ban: str, co_quan: str | None = None, trang: int = 1)
 # 4. Tra cứu tuân thủ
 
 
-def tra_cuu_tuan_thu(conn, tinh_huong: str, linh_vuc: str | None = None, gioi_han: int = 8) -> str:
+def tra_cuu_tuan_thu(
+    conn,
+    tinh_huong: str,
+    linh_vuc: str | None = None,
+    gioi_han: int = 8,
+    tinh: str | None = None,
+    pham_vi: str = "mac_dinh",
+) -> str:
     q = _fts_query(tinh_huong, mode="or")
     if not q:
         return "Mô tả tình huống trống."
+    dk = _dat_pham_vi(conn, pham_vi, tinh)
     hits = conn.execute(
         "SELECT f.unit_id, f.doc_id, bm25(units_fts) AS rank FROM units_fts f "
-        "WHERE units_fts MATCH ? ORDER BY rank LIMIT 200",
+        f"WHERE units_fts MATCH ?{dk} ORDER BY rank LIMIT 200",
         (q,),
     ).fetchall()
     out = []

@@ -125,3 +125,26 @@ def test_status_logic():
     d = {"tinh_trang_nguon": "Hết hiệu lực toàn bộ", "ngay_het_hieu_luc": "2025-07-01"}
     assert tinh_trang(d, date(2026, 1, 1))[0] == "Hết hiệu lực toàn bộ"
     assert tinh_trang({}, date(2026, 1, 1))[0] == "Cần kiểm tra"
+
+
+def test_pham_vi_trung_uong_va_dia_phuong(conn):
+    # Mặc định không nêu tỉnh: chỉ văn bản trung ương, kèm nhắc có văn bản địa phương khớp.
+    out = tools.tim_van_ban(conn, "quy dinh mau", bao_gom_het_hieu_luc=True)
+    assert "01/2099/QĐ-UBND" not in out
+    assert "2 văn bản địa phương khớp" in out
+    # Nêu tỉnh (cũ hoặc mới): thêm văn bản của đúng tỉnh đó.
+    out = tools.tim_van_ban(conn, "quy dinh mau", tinh="Bình Dương", bao_gom_het_hieu_luc=True)
+    assert "tỉnh Bình Dương" in out and "tỉnh Đồng Nai" not in out
+    out = tools.tim_van_ban(conn, "quy dinh mau", tinh="Hồ Chí Minh", bao_gom_het_hieu_luc=True)
+    assert "tỉnh Bình Dương" in out and "tỉnh Đồng Nai" not in out
+    out = tools.tim_van_ban(conn, "quy dinh mau", pham_vi="dia_phuong", bao_gom_het_hieu_luc=True)
+    assert "tỉnh Bình Dương" in out and "tỉnh Đồng Nai" in out
+    out = tools.tim_van_ban(conn, "quy dinh mau", pham_vi="dia_phuong", tinh="Đồng Nai", bao_gom_het_hieu_luc=True)
+    assert "tỉnh Đồng Nai" in out and "tỉnh Bình Dương" not in out and "999/2099/NĐ-CP" not in out
+    # Tìm theo số ký hiệu: mọi phạm vi.
+    assert "Đồng Nai" in tools.tim_van_ban(conn, "01/2099/QĐ-UBND")
+    out = tools.tra_cuu_tuan_thu(conn, "áp dụng trên địa bàn tỉnh")
+    assert "QĐ-UBND" not in out
+    assert "QĐ-UBND" in tools.tra_cuu_tuan_thu(conn, "áp dụng trên địa bàn tỉnh", tinh="Đồng Nai")
+    with pytest.raises(ValueError):
+        tools.tim_van_ban(conn, "quy dinh mau", pham_vi="sai")
