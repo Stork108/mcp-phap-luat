@@ -99,9 +99,10 @@ def _ngoai_ngoac_kep(lines: list[str]) -> list[tuple[int, str]]:
 
 
 RE_TOKEN = re.compile(
-    r"(?P<diem>(?:điểm|Điểm)\s+[a-zđ](?![\w])(?:\s*(?:,|và)\s*(?:điểm\s+)?[a-zđ](?![\w]))*)"
+    r"(?P<diem>(?:điểm|Điểm)\s+[a-zđ](?:\.\d+)?(?![\w])(?:\s*(?:,|và)\s*(?:điểm\s+)?[a-zđ](?:\.\d+)?(?![\w]))*)"
     r"|(?P<khoan>(?:khoản|Khoản)\s+\d+[a-zđ]?(?:\s*(?:,|và)\s*(?:khoản\s+)?\d+[a-zđ]?(?![\w]))*)"
     r"|(?P<dieu>(?:Điều|điều)\s+\d+[a-zđ]?)"
+    r"|(?P<khac>(?:Chương|Phụ lục|Mục)\s+[IVXLC]+[A-Z]?\b|(?:Chương|Phụ lục)\s+\d+\b)"
 )
 
 
@@ -118,8 +119,11 @@ def _vi_tri_trong(text: str, dieu_mac_dinh: str | None = None) -> list[str]:
             out.extend([f"điểm {d} khoản {k} Điều {dieu}" for d in ds] or [f"khoản {k} Điều {dieu}"])
 
     for m in RE_TOKEN.finditer(text):
-        if m.group("diem"):
-            cho_diem += re.findall(r"(?<![\w])[a-zđ](?![\w])", m.group("diem").split(None, 1)[1])
+        if m.group("khac"):
+            out.append(m.group("khac"))
+            cho_khoan, cho_diem = [], []
+        elif m.group("diem"):
+            cho_diem += re.findall(r"(?<![\w.])[a-zđ](?:\.\d+)?(?![\w])", m.group("diem").split(None, 1)[1])
         elif m.group("khoan"):
             ks = re.findall(r"\d+[a-zđ]?", m.group("khoan"))
             for i, k in enumerate(ks):
@@ -154,32 +158,41 @@ RE_LOAI = re.compile(_LOAI)
 RE_LOAI_CUOI = re.compile(_LOAI + r"(?:\s+[^\d;]{0,100}?)?\s+(?:số\s+)?$")
 
 
+RE_DONG_TU_MO_TA = re.compile(r"sửa đổi|bổ sung|bãi bỏ|hướng dẫn|quy định chi tiết|thi hành|thay thế", re.I)
+RE_TEN_SUA_DOI = re.compile(r"(?:^|,|;|\bvà|\bhoặc)\s*" + _LOAI + r"\s+(?:sửa đổi|bổ sung)", re.I)
+
+
 def tach_muc_van_ban(part: str) -> list[tuple[str, str]]:
     """Các văn bản bị tác động trong một mệnh đề, kèm đoạn chữ đứng trước (chứa vị trí Điều/Khoản).
 
-    Văn bản đầu tiên luôn được nhận. Văn bản sau chỉ được nhận khi văn bản liền trước được nhận
-    và giữa hai văn bản là dấu phẩy, 'và', 'hoặc', hoặc một vị trí ('khoản 2 Điều 8 của ...').
-    Văn bản được nhắc trong phần mô tả ('... sửa đổi, bổ sung một số điều của Nghị định số X') bị bỏ."""
+    Văn bản đầu tiên luôn được nhận. Văn bản sau chỉ được nhận khi văn bản liền trước được nhận và
+    đoạn giữa hai văn bản không phải phần mô tả: không chứa tên loại văn bản khác, không chứa động từ
+    'sửa đổi, bổ sung, hướng dẫn, quy định chi tiết...', và kết thúc bằng dấu phẩy, 'và', 'hoặc'.
+    Ngoại lệ: tên văn bản dạng 'và Luật sửa đổi, bổ sung ... của Luật X số Y' được nhận, không kèm vị trí."""
     out: list[tuple[str, str]] = []
     prev_end = 0
     prev_ok = True
-    for idx, m in enumerate(RE_SO.finditer(part)):
+    for m in RE_SO.finditer(part):
         so = m.group(1)
         if so not in tach_so(part[max(0, m.start() - 30) : m.end()]):
             continue
         truoc = part[prev_end : m.start()]
-        lm = RE_LOAI_CUOI.search(truoc)
-        seg = truoc[: lm.start()] if lm else truoc
+        loais = list(RE_LOAI.finditer(truoc))
+        seg = truoc[: loais[-1].start()] if loais else truoc
         if not out and prev_end == 0:
             ok = True
+        elif not prev_ok:
+            ok = False
+        elif RE_TEN_SUA_DOI.search(seg):
+            ok, seg = True, ""
+        elif RE_LOAI.search(seg) or RE_DONG_TU_MO_TA.search(seg):
+            ok = False
         else:
             s2 = re.sub(r"\s*(?:của|tại)\s*$", "", seg).rstrip()
-            ok = prev_ok and (
-                s2 == ""
-                or re.search(r"(?:,|;|:|\bvà|\bhoặc)$", s2) is not None
-                or re.search(r"(?:Điều|điều)\s+\d+[a-zđ]?$", s2) is not None
+            ok = s2 == "" or re.search(r"(?:,|:|\bvà|\bhoặc)$", s2) is not None or bool(
+                re.search(r"(?:Điều|điều)\s+\d+[a-zđ]?$", s2)
             )
-            if ok and re.search(r"(?:,|\bvà|\bhoặc)$", s2) and not re.search(r"(?:Điều|điều)\s+\d", seg):
+            if ok and not re.search(r"(?:Điều|điều)\s+\d", seg):
                 seg = ""
         if ok:
             out.append((so, seg))
@@ -205,12 +218,12 @@ def doc_sua_doi(dieu_so: str, dieu_text: str, so_dich_mac_dinh: str | None) -> l
     for i, line in _ngoai_ngoac_kep(lines):
         if i == 0:
             continue
-        la_cha = bool(re.match(r"^\s*\d+[a-zđ]?\.", line))
-        if la_cha:
-            ctx_dich, dieu_cha = so_dich, None
         m = RE_LENH_SUA.match(line) or RE_LENH_CON.match(line)
         if not m:
             continue
+        la_cha = bool(re.match(r"^\s*\d+[a-zđ]?\.", line))
+        if la_cha:
+            ctx_dich, dieu_cha = so_dich, None
         loai = _loai_tu_dong_tu(m.group(1))
         cau = re.split(r"\bnhư sau\b|:\s*$", line)[0]
         co_dich_rieng = False
@@ -290,14 +303,18 @@ def doc_hieu_luc(dieu_so: str, dieu_text: str) -> list[QuanHe]:
         loai = (dong_tu_ds if la_muc and dong_tu_ds else None) or dt
         if not loai:
             continue
+        pos_hl = [h.start() for h in RE_HET_HL.finditer(line)]
+        off = 0
         for muc in line.split(";"):
-            pos = RE_HET_HL.search(muc)
             for so, seg in tach_muc_van_ban(muc):
-                if loai == "het_hieu_luc" and not la_muc and (not pos or muc.find(so) > pos.start()):
-                    continue
+                if loai == "het_hieu_luc" and not la_muc:
+                    vi = off + muc.find(so)
+                    if not any(p > vi for p in pos_hl):
+                        continue
                 seg = re.split(r"(?:này|này)\s+(?:thay thế|bãi bỏ)|[Bb]ãi bỏ|thay thế", seg)[-1]
                 for vt in _vi_tri_trong(seg) or [None]:
                     out.append(QuanHe(loai, so, vt, f"Điều {dieu_so}", _cat(muc)))
+            off += len(muc) + 1
     return out
 
 
@@ -347,7 +364,9 @@ def doc_van_ban(conn: sqlite3.Connection, doc: sqlite3.Row) -> list[QuanHe]:
             for s in so_ty:
                 out.append(QuanHe("huong_dan", s, None, None, _cat(ty)))
 
-    # bỏ trùng, bỏ tự trỏ về chính mình
+    # bỏ trùng, bỏ tự trỏ về chính mình, bỏ dòng không vị trí khi đã có dòng có vị trí cùng loại, cùng đích
+    co_vt = {(q.loai, chuan_hoa_so_ky_hieu(q.dst_so), q.src_vi_tri) for q in out if q.dst_vi_tri}
+    out = [q for q in out if q.dst_vi_tri or (q.loai, chuan_hoa_so_ky_hieu(q.dst_so), q.src_vi_tri) not in co_vt]
     seen = set()
     res = []
     for q in out:

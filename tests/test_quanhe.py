@@ -192,3 +192,34 @@ def test_thay_cum_tu_ghi_sua_doi_vi_tri_ngoai_ngoac_kep():
     assert ("sua_doi", "08/2099/QH99", "khoản 2 Điều 4") in vt
     assert ("sua_doi", "71/2098/NĐ-CP", "điểm b khoản 2 Điều 94") in vt
     assert not any(q[1] == "102/2098/NĐ-CP" for q in vt)
+
+
+def test_van_ban_trong_ten_van_ban_khac_khong_bi_tinh():
+    dieu = """Điều 25. Hiệu lực thi hành
+2. Kể từ ngày Thông tư này có hiệu lực thi hành, Thông tư số 32/2098/TT-BTC ngày 31 tháng 5 năm 2098 hướng dẫn thực hiện một số điều của Luật Quản lý thuế, Nghị định số 123/2098/NĐ-CP (được sửa đổi tại Nghị định số 70/2098/NĐ-CP) hết hiệu lực.
+3. Luật doanh nghiệp số 60/2097/QH99 và Luật sửa đổi, bổ sung Điều 170 của Luật doanh nghiệp số 37/2098/QH99 hết hiệu lực kể từ ngày Luật này có hiệu lực.
+4. Nghị định số 196/CP ngày 31 tháng 12 năm 2094; Nghị định số 93/2097/NĐ-CP ngày 11 tháng 11 năm 2097; Nghị định số 33/2098/NĐ-CP hết hiệu lực.
+5. Các văn bản sau đây hết hiệu lực:
+d) Nghị định số 57/2098/NĐ-CP bổ sung điểm g khoản 2 Điều 20 Nghị định số 218/2097/NĐ-CP;
+đ) Chương 2 Thông tư số 09/2097/TT-BTC."""
+    vt = {(q.loai, q.dst_so, q.dst_vi_tri) for q in doc_hieu_luc("25", dieu)}
+    assert vt == {
+        ("het_hieu_luc", "32/2098/TT-BTC", None),
+        ("het_hieu_luc", "60/2097/QH99", None),
+        ("het_hieu_luc", "37/2098/QH99", None),
+        ("het_hieu_luc", "93/2097/NĐ-CP", None),
+        ("het_hieu_luc", "33/2098/NĐ-CP", None),
+        ("het_hieu_luc", "57/2098/NĐ-CP", None),
+        ("het_hieu_luc", "09/2097/TT-BTC", "Chương 2"),
+    }
+
+
+def test_muc_con_ke_thua_dieu_khi_co_dong_danh_so_trong_trich_dan_khong_ngoac():
+    dieu = """Điều 219. Sửa đổi, bổ sung một số điều của Bộ luật Tố tụng dân sự số 92/2098/QH99
+2. Sửa đổi, bổ sung Điều 32 như sau:
+a) Sửa đổi, bổ sung tên điều, khoản 1; bổ sung các khoản 1a, 1b và 1c vào sau khoản 1 như sau:
+1. Dòng trích dẫn mất ngoặc kép.
+b) Bãi bỏ điểm a.4 khoản 10 như sau:"""
+    vt = {(q.loai, q.dst_vi_tri) for q in doc_sua_doi("219", dieu, None)}
+    assert {("sua_doi", "khoản 1 Điều 32"), ("sua_doi", "khoản 1a Điều 32"), ("sua_doi", "khoản 1c Điều 32")} <= vt
+    assert ("bai_bo", "điểm a.4 khoản 10 Điều 32") in vt
